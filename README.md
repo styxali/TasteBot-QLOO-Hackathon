@@ -49,7 +49,7 @@ TELEGRAM_BOT_TOKEN="your_telegram_bot_token"
 TELEGRAM_WEBHOOK_URL="https://your-domain.com/api/telegram/webhook"
 
 # Qloo (Cultural Intelligence)
-QLOO_API_KEY="DB2sJNuz-UoU3KsQmEYJDvHqiKx5qBTQwzIPkixUu6o"
+QLOO_API_KEY="your_qloo_api_key"
 
 # LLM Providers (at least one required)
 GROQ_API_KEY="your_groq_api_key"
@@ -57,7 +57,7 @@ OPENAI_API_KEY="your_openai_api_key"
 GEMINI_API_KEY="your_gemini_api_key"
 
 # Location Services
-FOURSQUARE_API_KEY="fsq3UNI6ZxxsJMSZPXlqzK+mq9kMJPpR/HWocd0Ot9XpkbM="
+FOURSQUARE_API_KEY="your_foursquare_api_key"
 GEOAPIFY_API_KEY="your_geoapify_api_key"
 
 # Stripe Payments
