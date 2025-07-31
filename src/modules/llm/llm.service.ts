@@ -27,30 +27,47 @@ export class LlmService {
   }
 
   async generateResponse(prompt: string, context?: any): Promise<LLMResponse> {
-    // Try Groq first (primary)
-    if (this.providers.groq) {
+    const providers = [
+      { name: 'groq', fn: () => this.callGroq(prompt, context), available: !!this.providers.groq },
+      { name: 'openai', fn: () => this.callOpenAI(prompt, context), available: !!this.providers.openai },
+      { name: 'gemini', fn: () => this.callGemini(prompt, context), available: !!this.providers.gemini },
+    ];
+
+    for (const provider of providers) {
+      if (!provider.available) continue;
+      
       try {
-        return await this.callGroq(prompt, context);
+        return await this.retryWithBackoff(provider.fn, 2);
       } catch (error) {
-        console.error('Groq failed, trying fallback:', error);
+        console.error(`${provider.name} failed:`, error.message);
+        continue;
       }
     }
 
-    // Fallback to OpenAI
-    if (this.providers.openai) {
+    // Final fallback - return a basic response
+    return {
+      content: 'I\'m having trouble connecting to my AI services right now. Please try again in a moment, or describe what you\'re looking for and I\'ll do my best to help!',
+      provider: 'fallback',
+    };
+  }
+
+  private async retryWithBackoff<T>(operation: () => Promise<T>, maxRetries: number): Promise<T> {
+    let lastError: Error;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        return await this.callOpenAI(prompt, context);
+        return await operation();
       } catch (error) {
-        console.error('OpenAI failed, trying Gemini:', error);
+        lastError = error;
+        
+        if (attempt < maxRetries) {
+          const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
     }
-
-    // Final fallback to Gemini
-    if (this.providers.gemini) {
-      return await this.callGemini(prompt, context);
-    }
-
-    throw new Error('No LLM providers available');
+    
+    throw lastError;
   }
 
   async parseIntent(userMessage: string): Promise<UserIntent> {
