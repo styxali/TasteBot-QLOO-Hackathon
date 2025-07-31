@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserService } from '../user/user.service';
 import { PlanService } from '../plan/plan.service';
+import { SessionService } from '../session/session.service';
 
 @Injectable()
 export class TelegramService {
@@ -11,6 +12,7 @@ export class TelegramService {
     private readonly configService: ConfigService,
     private readonly userService: UserService,
     private readonly planService: PlanService,
+    private readonly sessionService: SessionService,
   ) {
     this.botToken = this.configService.get<string>('telegram.botToken');
   }
@@ -25,6 +27,9 @@ export class TelegramService {
     const telegramId = message.from.id.toString();
     const user = await this.userService.findOrCreate(telegramId);
 
+    // Add to conversation history
+    await this.sessionService.addToConversationHistory(telegramId, message.text);
+
     if (message.text === '/start') {
       await this.sendWelcomeMessage(message.chat.id);
       return;
@@ -36,13 +41,59 @@ export class TelegramService {
       return;
     }
 
+    if (message.text === '/mood') {
+      await this.sendMessage(message.chat.id, 'What\'s your current mood? (e.g., chill, energetic, romantic, adventurous)');
+      return;
+    }
+
+    // Check if it's a mood update
+    if (await this.isMoodUpdate(message.text)) {
+      await this.sessionService.updateMood(telegramId, message.text);
+      await this.sendMessage(message.chat.id, `Got it! Your mood is now set to "${message.text}". This will help me give you better recommendations.`);
+      return;
+    }
+
     // Handle regular messages
     if (user.credits > 0) {
-      await this.userService.deductCredits(telegramId);
-      await this.sendMessage(message.chat.id, `Processing your request... (${user.credits - 1} credits remaining)`);
+      const isFollowUp = await this.sessionService.isFollowUpMessage(telegramId, message.text);
+      
+      if (isFollowUp) {
+        const context = await this.sessionService.getConversationContext(telegramId);
+        const enhancedMessage = `${context} User says: ${message.text}`;
+        
+        const plan = await this.planService.generatePlanForUser(telegramId, enhancedMessage);
+        if (plan) {
+          await this.sessionService.savePlanToContext(telegramId, plan);
+          const formattedPlan = this.planService.formatPlanForTelegram(plan);
+          await this.sendMessage(message.chat.id, formattedPlan, this.createQuickStartKeyboard());
+        }
+      } else {
+        const plan = await this.planService.generatePlanForUser(telegramId, message.text);
+        if (plan) {
+          await this.sessionService.savePlanToContext(telegramId, plan);
+          const formattedPlan = this.planService.formatPlanForTelegram(plan);
+          await this.sendMessage(message.chat.id, formattedPlan, this.createQuickStartKeyboard());
+        } else {
+          await this.sendMessage(message.chat.id, 'Sorry, I couldn\'t generate a plan right now. Please try again!');
+        }
+      }
     } else {
       await this.sendMessage(message.chat.id, 'You\'re out of credits. Use /buy to get more!');
     }
+  }
+
+  private async isMoodUpdate(text: string): Promise<boolean> {
+    const moodKeywords = [
+      'chill', 'relaxed', 'calm', 'peaceful',
+      'energetic', 'hyper', 'active', 'pumped',
+      'romantic', 'intimate', 'cozy', 'loving',
+      'adventurous', 'exciting', 'wild', 'crazy',
+      'creative', 'artistic', 'inspired',
+      'social', 'party', 'fun', 'outgoing',
+      'introspective', 'thoughtful', 'quiet'
+    ];
+
+    return moodKeywords.some(mood => text.toLowerCase().includes(mood));
   }
 
   private async sendWelcomeMessage(chatId: number): Promise<void> {
