@@ -1,9 +1,159 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+interface QlooEntity {
+  id: string;
+  name: string;
+  type: string;
+  tags?: string[];
+}
+
+interface QlooInsightsResponse {
+  results: QlooEntity[];
+  metadata?: any;
+}
+
 @Injectable()
 export class QlooService {
-  constructor(private readonly configService: ConfigService) {}
+  private apiKey: string;
+  private apiUrl: string;
 
-  // Qloo service methods will be implemented in later tasks
+  constructor(private readonly configService: ConfigService) {
+    this.apiKey = this.configService.get<string>('qloo.apiKey');
+    this.apiUrl = this.configService.get<string>('qloo.apiUrl');
+  }
+
+  async searchEntities(query: string, type?: string): Promise<QlooEntity[]> {
+    const url = `${this.apiUrl}/v1/insights/search`;
+    
+    const params = new URLSearchParams({
+      q: query,
+      ...(type && { type }),
+      limit: '10',
+    });
+
+    try {
+      const response = await fetch(`${url}?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Qloo API error: ${response.status}`);
+      }
+
+      const data: QlooInsightsResponse = await response.json();
+      return data.results || [];
+    } catch (error) {
+      console.error('Qloo search error:', error);
+      return [];
+    }
+  }
+
+  async getRecommendations(entities: string[], location?: string): Promise<QlooEntity[]> {
+    const url = `${this.apiUrl}/v1/insights/recommendations`;
+    
+    const payload = {
+      entities,
+      ...(location && { location }),
+      limit: 10,
+      types: ['restaurant', 'bar', 'venue', 'activity'],
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Qloo API error: ${response.status}`);
+      }
+
+      const data: QlooInsightsResponse = await response.json();
+      return data.results || [];
+    } catch (error) {
+      console.error('Qloo recommendations error:', error);
+      return [];
+    }
+  }
+
+  async getTags(entityId: string): Promise<string[]> {
+    const url = `${this.apiUrl}/v1/insights/entities/${entityId}/tags`;
+    
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Qloo API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.tags || [];
+    } catch (error) {
+      console.error('Qloo tags error:', error);
+      return [];
+    }
+  }
+
+  buildQueryFromTasteProfile(tasteProfile: any): string[] {
+    const queries = [];
+    
+    if (tasteProfile.movies) {
+      queries.push(...tasteProfile.movies);
+    }
+    
+    if (tasteProfile.music) {
+      queries.push(...tasteProfile.music);
+    }
+    
+    if (tasteProfile.books) {
+      queries.push(...tasteProfile.books);
+    }
+    
+    if (tasteProfile.aesthetics) {
+      queries.push(...tasteProfile.aesthetics);
+    }
+
+    return queries;
+  }
+
+  async findSimilarEntities(entityId: string, type?: string): Promise<QlooEntity[]> {
+    const url = `${this.apiUrl}/v1/insights/entities/${entityId}/similar`;
+    
+    const params = new URLSearchParams({
+      ...(type && { type }),
+      limit: '5',
+    });
+
+    try {
+      const response = await fetch(`${url}?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Qloo API error: ${response.status}`);
+      }
+
+      const data: QlooInsightsResponse = await response.json();
+      return data.results || [];
+    } catch (error) {
+      console.error('Qloo similar entities error:', error);
+      return [];
+    }
+  }
 }
