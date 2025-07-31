@@ -54,6 +54,11 @@ export class TelegramService {
       return;
     }
 
+    if (message.text === '/demo') {
+      await this.sendDemoFlow(message.chat.id);
+      return;
+    }
+
     // Check if it's a mood update
     if (await this.isMoodUpdate(message.text)) {
       await this.sessionService.updateMood(telegramId, message.text);
@@ -238,6 +243,27 @@ export class TelegramService {
       console.error('Download file error:', error);
       throw error;
     }
+  }
+
+  private async sendDemoFlow(chatId: number): Promise<void> {
+    const demoText = `🎬 DEMO MODE: Here are some examples to try:
+
+🎯 **Text Examples:**
+• "I love Blade Runner and jazz in Tokyo"
+• "Cozy coffee shop vibes in Paris" 
+• "Cyberpunk night out in Berlin"
+• "Minimalist aesthetic with good wine"
+
+📸 **Multi-Modal:**
+• Send a photo of your aesthetic
+• Record a voice message with your preferences
+• Share your location for nearby spots
+
+Each shows different AI capabilities! 🤖
+
+Try any of these to see TasteBot's cultural intelligence in action.`;
+
+    await this.sendMessage(chatId, demoText);
   }
 
   private async sendWelcomeMessage(chatId: number): Promise<void> {

@@ -9,8 +9,7 @@ export class UserService {
   async createUser(telegramId: string, phoneNumber?: string): Promise<User> {
     return this.prisma.user.create({
       data: {
-        telegramId,
-        phoneNumber,
+        telegramId: BigInt(telegramId),
         credits: 5, // Free credits on signup
       },
     });
@@ -18,7 +17,7 @@ export class UserService {
 
   async findByTelegramId(telegramId: string): Promise<User | null> {
     return this.prisma.user.findUnique({
-      where: { telegramId },
+      where: { telegramId: BigInt(telegramId) },
     });
   }
 
@@ -30,14 +29,14 @@ export class UserService {
 
   async updateUser(telegramId: string, data: Partial<User>): Promise<User> {
     return this.prisma.user.update({
-      where: { telegramId },
+      where: { telegramId: BigInt(telegramId) },
       data,
     });
   }
 
   async deductCredits(telegramId: string, amount: number = 1): Promise<User> {
     return this.prisma.user.update({
-      where: { telegramId },
+      where: { telegramId: BigInt(telegramId) },
       data: {
         credits: {
           decrement: amount,
@@ -48,7 +47,7 @@ export class UserService {
 
   async addCredits(telegramId: string, amount: number): Promise<User> {
     return this.prisma.user.update({
-      where: { telegramId },
+      where: { telegramId: BigInt(telegramId) },
       data: {
         credits: {
           increment: amount,
@@ -63,16 +62,33 @@ export class UserService {
   }
 
   async updateTasteProfile(telegramId: string, tasteProfile: any): Promise<User> {
-    return this.prisma.user.update({
-      where: { telegramId },
-      data: {
-        tasteProfile,
+    // First ensure user exists
+    const user = await this.findOrCreate(telegramId);
+    
+    // Update or create taste profile
+    await this.prisma.tasteProfile.upsert({
+      where: { userId: user.id },
+      update: {
+        tasteKeywords: Array.isArray(tasteProfile) ? tasteProfile : [tasteProfile.toString()],
+      },
+      create: {
+        userId: user.id,
+        tasteKeywords: Array.isArray(tasteProfile) ? tasteProfile : [tasteProfile.toString()],
       },
     });
+
+    return this.findByTelegramId(telegramId);
   }
 
   async getTasteProfile(telegramId: string): Promise<any> {
-    const user = await this.findByTelegramId(telegramId);
-    return user?.tasteProfile || {};
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId: BigInt(telegramId) },
+      include: { tasteProfile: true },
+    });
+    
+    return {
+      keywords: user?.tasteProfile?.tasteKeywords || [],
+      preferences: user?.tasteProfile?.tasteKeywords || [],
+    };
   }
 }

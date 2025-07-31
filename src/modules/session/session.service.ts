@@ -23,14 +23,16 @@ export class SessionService {
     if (!session) {
       // Try to load from database
       const user = await this.prisma.user.findUnique({
-        where: { telegramId },
+        where: { telegramId: BigInt(telegramId) },
       });
 
       session = {
         telegramId,
-        lastLocation: user?.lastLocation || undefined,
-        currentMood: user?.currentMood || undefined,
-        lastPreferences: user?.lastPreferences || [],
+        lastLocation: user?.lastLocationLat && user?.lastLocationLon 
+          ? `${user.lastLocationLat},${user.lastLocationLon}` 
+          : undefined,
+        currentMood: undefined, // Will be stored in session memory
+        lastPreferences: [], // Will be stored in session memory
         conversationHistory: [],
         contextTimestamp: new Date(),
       };
@@ -51,15 +53,19 @@ export class SessionService {
 
     this.sessions.set(telegramId, session);
 
-    // Persist key data to database
-    await this.prisma.user.update({
-      where: { telegramId },
-      data: {
-        lastLocation: session.lastLocation,
-        currentMood: session.currentMood,
-        lastPreferences: session.lastPreferences,
-      },
-    });
+    // Persist location data to database
+    if (session.lastLocation) {
+      const [lat, lng] = session.lastLocation.split(',').map(Number);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        await this.prisma.user.update({
+          where: { telegramId: BigInt(telegramId) },
+          data: {
+            lastLocationLat: lat,
+            lastLocationLon: lng,
+          },
+        });
+      }
+    }
   }
 
   async addToConversationHistory(telegramId: string, message: string): Promise<void> {

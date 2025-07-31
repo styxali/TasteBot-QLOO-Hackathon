@@ -14,6 +14,7 @@ import { QlooModule } from './modules/qloo/qloo.module';
 import { LlmModule } from './modules/llm/llm.module';
 import { LocationModule } from './modules/location/location.module';
 import { StripeModule } from './modules/stripe/stripe.module';
+import { SessionModule } from './modules/session/session.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { StripeModule } from './modules/stripe/stripe.module';
     LlmModule,
     LocationModule,
     StripeModule,
+    SessionModule,
   ],
   controllers: [AppController],
   providers: [AppService],

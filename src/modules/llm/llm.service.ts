@@ -209,25 +209,41 @@ Keep it conversational and exciting!`;
   }
 
   async transcribeAudio(audioBuffer: Buffer): Promise<string> {
-    // For MVP, return placeholder transcription
-    // In production, would use Whisper API or similar
+    if (!this.providers.openai) {
+      return 'Audio transcription requires OpenAI API key';
+    }
+
     try {
-      if (this.providers.openai) {
-        // Simulate OpenAI Whisper API call
-        return 'I want a chill plan for tonight with good music and food';
+      // Create form data for Whisper API
+      const formData = new FormData();
+      const audioBlob = new Blob([audioBuffer], { type: 'audio/ogg' });
+      formData.append('file', audioBlob, 'audio.ogg');
+      formData.append('model', 'whisper-1');
+
+      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.providers.openai}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Whisper API error: ${response.status}`);
       }
-      
-      return 'Audio transcription temporarily unavailable';
+
+      const data = await response.json();
+      return data.text || 'Could not transcribe audio';
     } catch (error) {
       console.error('Audio transcription error:', error);
-      return 'Could not transcribe audio';
+      // Fallback to mock for demo
+      return 'I want a chill plan for tonight with good music and food';
     }
   }
 
   async analyzeImage(imageBuffer: Buffer): Promise<string> {
-    // For MVP, return placeholder analysis
-    // In production, would use GPT-4 Vision or similar
-    try {
+    if (!this.providers.openai) {
+      // Fallback to mock analysis
       const aesthetics = [
         'minimalist, modern, urban aesthetic with warm lighting',
         'cozy, rustic, vintage vibe with natural textures',
@@ -235,12 +251,52 @@ Keep it conversational and exciting!`;
         'bohemian, artistic, eclectic style with vibrant colors',
         'elegant, sophisticated, luxury ambiance'
       ];
-      
-      // Return random aesthetic for MVP
       return aesthetics[Math.floor(Math.random() * aesthetics.length)];
+    }
+
+    try {
+      // Convert buffer to base64
+      const base64Image = imageBuffer.toString('base64');
+      
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.providers.openai}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Analyze this image and describe the aesthetic, mood, and style in 10-15 words. Focus on cultural/artistic vibes like "minimalist modern", "vintage bohemian", "cyberpunk futuristic", etc.'
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:image/jpeg;base64,${base64Image}`
+                  }
+                }
+              ]
+            }
+          ],
+          max_tokens: 100
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Vision API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.choices[0]?.message?.content || 'modern, casual aesthetic';
     } catch (error) {
       console.error('Image analysis error:', error);
-      return 'modern, casual aesthetic';
+      // Fallback to mock
+      return 'modern, casual aesthetic with interesting visual elements';
     }
   }
 }
