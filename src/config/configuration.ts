@@ -13,7 +13,7 @@ export default () => ({
   
   qloo: {
     apiKey: process.env.QLOO_API_KEY,
-    apiUrl: process.env.QLOO_API_URL || 'https://staging.api.qloo.com',
+    apiUrl: process.env.QLOO_API_URL || 'https://hackathon.api.qloo.com',
   },
   
   llm: {

@@ -73,16 +73,16 @@ export class LlmService {
   async parseIntent(userMessage: string): Promise<UserIntent> {
     const prompt = `Analyze this user message and extract intent:
     
-Message: "${userMessage}"
+      Message: "${userMessage}"
 
-Return JSON with:
-- type: plan_request|question|taste_update|location_query
-- location: extracted location if any
-- preferences: array of cultural preferences mentioned
-- mood: extracted mood/vibe if any
-- timeframe: when they want to do this
+      Return JSON with:
+      - type: plan_request|question|taste_update|location_query
+      - location: extracted location if any
+      - preferences: array of cultural preferences mentioned
+      - mood: extracted mood/vibe if any
+      - timeframe: when they want to do this
 
-Example: {"type": "plan_request", "location": "Lisbon", "preferences": ["jazz", "sushi"], "mood": "chill", "timeframe": "tonight"}`;
+      Example: {"type": "plan_request", "location": "Lisbon", "preferences": ["jazz", "sushi"], "mood": "chill", "timeframe": "tonight"}`;
 
     try {
       const response = await this.generateResponse(prompt);
@@ -100,16 +100,16 @@ Example: {"type": "plan_request", "location": "Lisbon", "preferences": ["jazz", 
   async synthesizePlan(qlooData: any[], userIntent: UserIntent): Promise<string> {
     const prompt = `Create a personalized plan based on:
 
-User Intent: ${JSON.stringify(userIntent)}
-Qloo Recommendations: ${JSON.stringify(qlooData)}
+        User Intent: ${JSON.stringify(userIntent)}
+        Qloo Recommendations: ${JSON.stringify(qlooData)}
 
-Generate a friendly, engaging response with:
-1. Brief intro acknowledging their taste
-2. 3-5 specific recommendations with emojis
-3. Brief description for each
-4. Encouraging closing
+        Generate a friendly, engaging response with:
+        1. Brief intro acknowledging their taste
+        2. 3-5 specific recommendations with emojis
+        3. Brief description for each
+        4. Encouraging closing
 
-Keep it conversational and exciting!`;
+        Keep it conversational and exciting!`;
 
     const response = await this.generateResponse(prompt);
     return response.content;

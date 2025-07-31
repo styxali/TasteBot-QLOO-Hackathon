@@ -4,7 +4,7 @@ import { LlmService } from '../llm/llm.service';
 import { LocationService } from '../location/location.service';
 import { UserService } from '../user/user.service';
 
-interface PlanActivity {
+export interface PlanActivity {
   name: string;
   description: string;
   address: string;
@@ -13,7 +13,7 @@ interface PlanActivity {
   rating?: number;
 }
 
-interface GeneratedPlan {
+export interface GeneratedPlan {
   activities: PlanActivity[];
   summary: string;
   location: string;
