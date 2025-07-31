@@ -1,8 +1,33 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  await app.listen(3000);
+  
+  const configService = app.get(ConfigService);
+  const port = configService.get<number>('port') || 3000;
+
+  // Enable CORS for development
+  app.enableCors({
+    origin: true,
+    credentials: true,
+  });
+
+  // Global prefix for API routes
+  app.setGlobalPrefix('api', {
+    exclude: ['health', '/'],
+  });
+
+  console.log(`🚀 TasteBot API starting on port ${port}`);
+  console.log(`📱 Telegram webhook: http://localhost:${port}/api/telegram/webhook`);
+  console.log(`💳 Stripe webhook: http://localhost:${port}/api/stripe/webhook`);
+  console.log(`🏥 Health check: http://localhost:${port}/health`);
+
+  await app.listen(port);
 }
-bootstrap();
+
+bootstrap().catch(error => {
+  console.error('Failed to start application:', error);
+  process.exit(1);
+});
