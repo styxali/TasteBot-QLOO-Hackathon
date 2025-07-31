@@ -27,28 +27,25 @@ export class LlmService {
   }
 
   async generateResponse(prompt: string, context?: any): Promise<LLMResponse> {
-    const providers = [
-      { name: 'groq', fn: () => this.callGroq(prompt, context), available: !!this.providers.groq },
-      { name: 'openai', fn: () => this.callOpenAI(prompt, context), available: !!this.providers.openai },
-      { name: 'gemini', fn: () => this.callGemini(prompt, context), available: !!this.providers.gemini },
-    ];
-
-    for (const provider of providers) {
-      if (!provider.available) continue;
-      
-      try {
-        return await this.retryWithBackoff(provider.fn, 2);
-      } catch (error) {
-        console.error(`${provider.name} failed:`, error.message);
-        continue;
-      }
+    // Use OpenAI only for reliability
+    if (!this.providers.openai) {
+      return {
+        content: 'OpenAI API key not configured. Please set OPENAI_API_KEY in your environment.',
+        provider: 'fallback',
+      };
     }
 
-    // Final fallback - return a basic response
-    return {
-      content: 'I\'m having trouble connecting to my AI services right now. Please try again in a moment, or describe what you\'re looking for and I\'ll do my best to help!',
-      provider: 'fallback',
-    };
+    try {
+      return await this.retryWithBackoff(() => this.callOpenAI(prompt, context), 2);
+    } catch (error) {
+      console.error('OpenAI failed:', error.message);
+      
+      // Fallback response
+      return {
+        content: 'I\'m having trouble connecting to my AI services right now. Please try again in a moment, or describe what you\'re looking for and I\'ll do my best to help!',
+        provider: 'fallback',
+      };
+    }
   }
 
   private async retryWithBackoff<T>(operation: () => Promise<T>, maxRetries: number): Promise<T> {
@@ -134,6 +131,11 @@ export class LlmService {
     });
 
     const data = await response.json();
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('Invalid Groq API response structure');
+    }
+    
     return {
       content: data.choices[0].message.content,
       provider: 'groq',
@@ -150,7 +152,7 @@ export class LlmService {
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: 'You are TasteBot, a cultural concierge that creates personalized plans based on taste.' },
+          { role: 'system', content: 'You are TasteBot, a cultural concierge that creates personalized plans based on taste. Be enthusiastic, use emojis, and create specific venue recommendations with addresses when possible.' },
           { role: 'user', content: prompt },
         ],
         max_tokens: 1000,
@@ -158,7 +160,17 @@ export class LlmService {
       }),
     });
 
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`OpenAI API error: ${response.status} - ${error.error?.message || 'Unknown error'}`);
+    }
+
     const data = await response.json();
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('Invalid OpenAI API response structure');
+    }
+    
     return {
       content: data.choices[0].message.content,
       provider: 'openai',

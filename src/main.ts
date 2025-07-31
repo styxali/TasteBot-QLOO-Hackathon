@@ -23,6 +23,14 @@ async function bootstrap() {
   console.log(`📱 Telegram webhook: http://localhost:${port}/api/telegram/webhook`);
   console.log(`💳 Stripe webhook: http://localhost:${port}/api/stripe/webhook`);
   console.log(`🏥 Health check: http://localhost:${port}/health`);
+  console.log(`🔧 Environment: ${configService.get('nodeEnv')}`);
+  console.log(`🤖 Bot token configured: ${!!configService.get('telegram.botToken')}`);
+  
+  // Log all incoming requests for debugging
+  app.use((req, res, next) => {
+    console.log(`📥 ${req.method} ${req.url} - ${new Date().toISOString()}`);
+    next();
+  });
 
   await app.listen(port);
 }

@@ -22,9 +22,19 @@ export class UserService {
   }
 
   async findOrCreate(telegramId: string, phoneNumber?: string): Promise<User> {
-    const user = await this.findByTelegramId(telegramId);
-    if (user) return user;
-    return this.createUser(telegramId, phoneNumber);
+    let user = await this.findByTelegramId(telegramId);
+    if (user) {
+      console.log(`✅ Found existing user ${telegramId} with ${user.credits} credits`);
+      return user;
+    }
+    
+    console.log(`🆕 Creating new user ${telegramId} with 5 free credits`);
+    user = await this.createUser(telegramId, phoneNumber);
+    
+    // Initialize empty taste profile
+    await this.updateTasteProfile(telegramId, []);
+    
+    return user;
   }
 
   async updateUser(telegramId: string, data: Partial<User>): Promise<User> {

@@ -24,6 +24,11 @@ export class QlooService {
   }
 
   async searchEntities(query: string, type?: string): Promise<QlooEntity[]> {
+    if (!this.apiKey) {
+      console.warn('Qloo API key not configured, using fallback data');
+      return this.getFallbackEntities(query);
+    }
+
     const url = `${this.apiUrl}/v1/insights/search`;
     
     const params = new URLSearchParams({
@@ -42,6 +47,9 @@ export class QlooService {
         });
 
         if (!response.ok) {
+          if (response.status === 401) {
+            throw new Error('Qloo API key is invalid');
+          }
           if (response.status === 429) {
             throw new Error('Rate limit exceeded');
           }
@@ -80,6 +88,14 @@ export class QlooService {
 
   private getFallbackEntities(query: string): QlooEntity[] {
     const fallbackData: Record<string, QlooEntity[]> = {
+      'hip hop': [
+        { id: 'hiphop-1', name: 'Underground Hip Hop Club', type: 'venue', tags: ['hip-hop', 'urban', 'nightlife'] },
+        { id: 'hiphop-2', name: 'Rap Battle Arena', type: 'venue', tags: ['hip-hop', 'live', 'energy'] },
+      ],
+      'steak': [
+        { id: 'steak-1', name: 'Prime Steakhouse', type: 'restaurant', tags: ['steak', 'premium', 'meat'] },
+        { id: 'steak-2', name: 'Urban Grill', type: 'restaurant', tags: ['steak', 'modern', 'hip'] },
+      ],
       'jazz': [
         { id: 'jazz-1', name: 'Blue Note', type: 'music', tags: ['jazz', 'smooth'] },
         { id: 'jazz-2', name: 'Jazz Café', type: 'venue', tags: ['jazz', 'intimate'] },
@@ -94,11 +110,18 @@ export class QlooService {
       ],
     };
 
-    const key = Object.keys(fallbackData).find(k => 
-      query.toLowerCase().includes(k)
-    );
+    // Check for multiple keywords
+    const matchedEntities: QlooEntity[] = [];
+    Object.keys(fallbackData).forEach(key => {
+      if (query.toLowerCase().includes(key)) {
+        matchedEntities.push(...fallbackData[key]);
+      }
+    });
     
-    return fallbackData[key] || [];
+    return matchedEntities.length > 0 ? matchedEntities : [
+      { id: 'generic-1', name: 'Local Hotspot', type: 'venue', tags: ['popular', 'trendy'] },
+      { id: 'generic-2', name: 'Urban Eatery', type: 'restaurant', tags: ['modern', 'casual'] },
+    ];
   }
 
   async getRecommendations(entities: string[], location?: string): Promise<QlooEntity[]> {
