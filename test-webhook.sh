@@ -3,7 +3,7 @@
 # Test webhook endpoint manually
 echo "Testing webhook endpoint..."
 
-curl -X POST http://localhost:3000/api/telegram/webhook \
+curl -X POST https://4c7e2b51008b.ngrok-free.app/webhook-test/322dce18-f93e-4f86-b9b1-3305519b7834/webhook \
   -H "Content-Type: application/json" \
   -d '{
     "update_id": 123456789,

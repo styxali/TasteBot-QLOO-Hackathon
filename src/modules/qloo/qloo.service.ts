@@ -6,11 +6,47 @@ interface QlooEntity {
   name: string;
   type: string;
   tags?: string[];
+  metadata?: any;
 }
 
 interface QlooInsightsResponse {
   results: QlooEntity[];
   metadata?: any;
+}
+
+interface QlooRelationship {
+  target: QlooEntity;
+  type: string;
+  strength?: number;
+}
+
+interface QlooExplanation {
+  reasoning: string;
+  factors: string[];
+  confidence: number;
+}
+
+interface CulturalProfile {
+  corePreferences: {
+    music: QlooEntity[];
+    movies: QlooEntity[];
+    books: QlooEntity[];
+    food: QlooEntity[];
+    aesthetics: QlooEntity[];
+  };
+  culturalConnections: CulturalConnection[];
+  tasteEvolution: {
+    timeline: any[];
+    patterns: any[];
+  };
+  personalityInsights: any[];
+}
+
+interface CulturalConnection {
+  sourceEntity: QlooEntity;
+  targetEntity: QlooEntity;
+  relationshipType: string;
+  strength: number;
 }
 
 @Injectable()
@@ -227,5 +263,155 @@ export class QlooService {
       console.error('Qloo similar entities error:', error);
       return [];
     }
+  }
+
+  async getEntityDetails(entityId: string): Promise<QlooEntity | null> {
+    if (!this.apiKey) return null;
+
+    const url = `${this.apiUrl}/v1/insights/entities/${entityId}`;
+    
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) return null;
+      
+      const data = await response.json();
+      return data.entity || null;
+    } catch (error) {
+      console.error('Qloo entity details error:', error);
+      return null;
+    }
+  }
+
+  async getEntityRelationships(entityId: string): Promise<QlooRelationship[]> {
+    if (!this.apiKey) return [];
+
+    const url = `${this.apiUrl}/v1/insights/entities/${entityId}/relationships`;
+    
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) return [];
+      
+      const data = await response.json();
+      return data.relationships || [];
+    } catch (error) {
+      console.error('Qloo relationships error:', error);
+      return [];
+    }
+  }
+
+  async getRecommendationExplanation(recommendationId: string): Promise<QlooExplanation | null> {
+    if (!this.apiKey) return null;
+
+    const url = `${this.apiUrl}/v1/insights/recommendations/${recommendationId}/explanation`;
+    
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) return null;
+      
+      const data = await response.json();
+      return data.explanation || null;
+    } catch (error) {
+      console.error('Qloo explanation error:', error);
+      return null;
+    }
+  }
+
+  async buildCulturalProfile(userInteractions: any[]): Promise<CulturalProfile> {
+    const profile: CulturalProfile = {
+      corePreferences: {
+        music: [],
+        movies: [],
+        books: [],
+        food: [],
+        aesthetics: [],
+      },
+      culturalConnections: [],
+      tasteEvolution: {
+        timeline: [],
+        patterns: [],
+      },
+      personalityInsights: [],
+    };
+
+    // Analyze user interactions to build profile
+    for (const interaction of userInteractions) {
+      if (interaction.type === 'preference') {
+        const entities = await this.searchEntities(interaction.content);
+        
+        for (const entity of entities) {
+          const category = this.categorizeEntity(entity);
+          if (category && profile.corePreferences[category]) {
+            profile.corePreferences[category].push(entity);
+          }
+        }
+      }
+    }
+
+    // Find cultural connections
+    profile.culturalConnections = await this.findCulturalConnections(profile.corePreferences);
+
+    return profile;
+  }
+
+  private categorizeEntity(entity: QlooEntity): keyof CulturalProfile['corePreferences'] | null {
+    const type = entity.type?.toLowerCase();
+    
+    if (type?.includes('music') || type?.includes('artist') || type?.includes('song')) {
+      return 'music';
+    }
+    if (type?.includes('movie') || type?.includes('film') || type?.includes('tv')) {
+      return 'movies';
+    }
+    if (type?.includes('book') || type?.includes('author') || type?.includes('literature')) {
+      return 'books';
+    }
+    if (type?.includes('food') || type?.includes('restaurant') || type?.includes('cuisine')) {
+      return 'food';
+    }
+    if (type?.includes('aesthetic') || type?.includes('style') || type?.includes('design')) {
+      return 'aesthetics';
+    }
+    
+    return null;
+  }
+
+  private async findCulturalConnections(preferences: CulturalProfile['corePreferences']): Promise<CulturalConnection[]> {
+    const connections: CulturalConnection[] = [];
+    
+    // Find connections between different preference categories
+    const allEntities = Object.values(preferences).flat();
+    
+    for (const entity of allEntities) {
+      const relationships = await this.getEntityRelationships(entity.id);
+      
+      for (const relationship of relationships) {
+        connections.push({
+          sourceEntity: entity,
+          targetEntity: relationship.target,
+          relationshipType: relationship.type,
+          strength: relationship.strength || 0.5,
+        });
+      }
+    }
+    
+    return connections;
   }
 }
