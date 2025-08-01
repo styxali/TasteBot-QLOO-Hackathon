@@ -17,6 +17,12 @@ import { StripeModule } from './modules/stripe/stripe.module';
 import { SessionModule } from './modules/session/session.module';
 import { LangChainModule } from './modules/langchain/langchain.module';
 import { NavigationModule } from './modules/navigation/navigation.module';
+import { MemoryModule } from './modules/memory/memory.module';
+import { MultimodalModule } from './modules/multimodal/multimodal.module';
+import { WebModule } from './modules/web/web.module';
+import { SearchModule } from './modules/search/search.module';
+import { CulturalModule } from './modules/cultural/cultural.module';
+import { ErrorHandlingModule } from './modules/error-handling/error-handling.module';
 
 @Module({
   imports: [
@@ -43,6 +49,12 @@ import { NavigationModule } from './modules/navigation/navigation.module';
     SessionModule,
     LangChainModule,
     NavigationModule,
+    MemoryModule,
+    MultimodalModule,
+    WebModule,
+    SearchModule,
+    CulturalModule,
+    ErrorHandlingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
