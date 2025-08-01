@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
-import { LocationService } from './location.service';
+import { FoursquareService } from './foursquare.service';
+import { GeoapifyService } from './geoapify.service';
+import { MapService } from './map.service';
 
 @Module({
-  providers: [LocationService],
-  exports: [LocationService],
+  providers: [FoursquareService, GeoapifyService, MapService],
+  exports: [FoursquareService, GeoapifyService, MapService],
 })
 export class LocationModule {}
