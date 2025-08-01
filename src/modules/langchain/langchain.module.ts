@@ -3,15 +3,18 @@ import { LangChainOrchestrator } from './langchain-orchestrator.service';
 import { ToolRegistry } from './tool-registry.service';
 import { QlooModule } from '../qloo/qloo.module';
 import { LocationModule } from '../location/location.module';
+import { SearchModule } from '../search/search.module';
 import { QlooInsightsTool } from './tools/qloo-insights.tool';
 import { QlooRecommendationsTool } from './tools/qloo-recommendations.tool';
 import { QlooSimilarTool } from './tools/qloo-similar.tool';
 import { QlooTagsTool } from './tools/qloo-tags.tool';
 import { FoursquareVenueTool } from './tools/foursquare-venue.tool';
 import { GeoapifyGeocodeTool } from './tools/geoapify-geocode.tool';
+import { TavilySearchTool } from './tools/tavily-search.tool';
+import { SerperEventsTool } from './tools/serper-events.tool';
 
 @Module({
-  imports: [QlooModule, LocationModule],
+  imports: [QlooModule, LocationModule, SearchModule],
   providers: [
     LangChainOrchestrator,
     ToolRegistry,
@@ -21,6 +24,8 @@ import { GeoapifyGeocodeTool } from './tools/geoapify-geocode.tool';
     QlooTagsTool,
     FoursquareVenueTool,
     GeoapifyGeocodeTool,
+    TavilySearchTool,
+    SerperEventsTool,
   ],
   exports: [LangChainOrchestrator, ToolRegistry],
 })
@@ -33,6 +38,8 @@ export class LangChainModule {
     private readonly qlooTagsTool: QlooTagsTool,
     private readonly foursquareVenueTool: FoursquareVenueTool,
     private readonly geoapifyGeocodeTool: GeoapifyGeocodeTool,
+    private readonly tavilySearchTool: TavilySearchTool,
+    private readonly serperEventsTool: SerperEventsTool,
   ) {
     // Register all tools
     this.toolRegistry.registerTool(this.qlooInsightsTool);
@@ -41,5 +48,7 @@ export class LangChainModule {
     this.toolRegistry.registerTool(this.qlooTagsTool);
     this.toolRegistry.registerTool(this.foursquareVenueTool);
     this.toolRegistry.registerTool(this.geoapifyGeocodeTool);
+    this.toolRegistry.registerTool(this.tavilySearchTool);
+    this.toolRegistry.registerTool(this.serperEventsTool);
   }
 }
