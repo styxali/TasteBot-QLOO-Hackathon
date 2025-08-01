@@ -1,16 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { BaseTasteBotTool } from '../base-tool';
+import { BaseTool } from '../base-tool';
 import { ToolResult, UserContext } from '../../../common/interfaces/tool.interface';
 import { QlooService } from '../../qloo/qloo.service';
 
 @Injectable()
-export class QlooRecommendationsTool extends BaseTasteBotTool {
+export class QlooRecommendationsTool extends BaseTool {
   name = 'qloo_recommendations';
   description = 'Get personalized recommendations based on cultural taste profile';
   parameters = {
-    entities: { type: 'array', required: true, description: 'Array of entity IDs for recommendations' },
-    location: { type: 'string', required: false, description: 'Location context for recommendations' },
-    limit: { type: 'number', required: false, description: 'Maximum number of recommendations' },
+    type: 'object' as const,
+    properties: {
+      entities: { type: 'array', description: 'Array of entity IDs for recommendations' },
+      location: { type: 'string', description: 'Location context for recommendations' },
+      limit: { type: 'number', description: 'Maximum number of recommendations' },
+    },
+    required: ['entities'],
   };
 
   constructor(private readonly qlooService: QlooService) {
