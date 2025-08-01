@@ -29,7 +29,7 @@ export class FoursquareVenueTool extends BaseTool {
       categories?: string[]; 
       limit?: number 
     }, 
-    context: UserContext
+    _context: UserContext
   ): Promise<ToolResult> {
     try {
       if (!this.validateParams(params, ['query', 'location'])) {
@@ -44,8 +44,32 @@ export class FoursquareVenueTool extends BaseTool {
         params.categories,
         params.limit || 10
       );
-      
-      const result = this.createSuccessResult(venues, {
+
+      // Format venues for interactive selection
+      const formattedVenues = venues.map((venue, index) => ({
+        number: index + 1,
+        fsq_id: venue.fsq_id,
+        name: venue.name,
+        address: venue.location?.formatted_address || venue.location?.address || 'Address not available',
+        category: venue.categories?.[0]?.name || 'Venue',
+        rating: venue.rating?.toString() || 'No rating',
+        price: venue.price ? '💰'.repeat(venue.price) : 'Price not available',
+        distance: venue.distance ? `${(venue.distance / 1000).toFixed(1)} km` : '',
+        hours: venue.hours?.display || 'Hours not available',
+        tel: venue.tel || '',
+        website: venue.website || '',
+        description: venue.description || '',
+        photos: venue.photos?.map(p => p.prefix + 'original' + p.suffix) || []
+      }));
+
+      const result = this.createSuccessResult({
+        venues: formattedVenues,
+        total: venues.length,
+        query: params.query,
+        location: params.location,
+        interactive: true,
+        type: 'venue_list'
+      }, {
         toolName: 'foursquare_venue',
         query: params.query,
         location: params.location,
@@ -56,6 +80,7 @@ export class FoursquareVenueTool extends BaseTool {
       this.logExecution(params, result);
       return result;
     } catch (error) {
+      console.error('❌ Foursquare venue search error:', error);
       const errorResult = this.createErrorResult(`Foursquare venue search failed: ${error.message}`);
       this.logExecution(params, errorResult);
       return errorResult;

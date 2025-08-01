@@ -1,0 +1,170 @@
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class ResponseFormatterService {
+  private escapeMarkdown(text: string): string {
+    return text?.toString().replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1') || '';
+  }
+
+  private createFoursquareUrl(venueId: string): string {
+    return `https://foursquare.com/v/${venueId}`;
+  }
+
+  formatVenueList(data: any): { text: string; keyboard?: any } {
+    if (!data.venues || !Array.isArray(data.venues)) {
+      return { text: 'No venues found.' };
+    }
+
+    let text = `🎯 *Found ${data.total || data.venues.length} Amazing Places*\n`;
+    text += `🔍 Searching: "${this.escapeMarkdown(data.query || '')}"\n\n`;
+    
+    // Create inline keyboard for venue selection
+    const keyboard = {
+      inline_keyboard: []
+    };
+
+    data.venues.forEach((venue, index) => {
+      // Header with name and rating
+      text += `${index + 1}. *${this.escapeMarkdown(venue.name)}*`;
+      if (venue.rating !== 'No rating') {
+        text += ` ⭐ ${this.escapeMarkdown(venue.rating)}`;
+      }
+      text += '\n';
+      
+      // Location and category
+      text += `📍 ${this.escapeMarkdown(venue.address || 'Address not available')}\n`;
+      text += `🏷️ ${this.escapeMarkdown(venue.category || 'Category not available')}`;
+      
+      // Price and distance
+      let details = [];
+      if (venue.price !== 'Price not available') {
+        details.push(`💰 ${this.escapeMarkdown(venue.price)}`);
+      }
+      if (venue.distance) {
+        details.push(`📏 ${this.escapeMarkdown(venue.distance)}`);
+      }
+      if (details.length > 0) {
+        text += `\n${details.join(' • ')}`;
+      }
+      
+      // Opening hours if available
+      if (venue.hours?.display) {
+        text += `\n🕒 ${this.escapeMarkdown(venue.hours.display)}`;
+      }
+
+      // Add "View Details" button for this venue
+      keyboard.inline_keyboard.push([
+        {
+          text: `📍 View ${venue.name}`,
+          callback_data: `venue_${venue.fsq_id}`
+        }
+      ]);
+      
+      text += '\n\n';
+    });
+
+    text += '💡 *Click the buttons below to view venue details*\n';
+    text += 'Or type a number (1-' + data.venues.length + ') for quick selection';
+
+    return { text, keyboard };
+  }
+
+  formatVenueDetails(venue: any): { text: string; keyboard?: any } {
+    let text = `🏪 *${this.escapeMarkdown(venue.name)}*\n\n`;
+    
+    // Main details
+    text += `📍 *Location:* ${this.escapeMarkdown(venue.address || 'Address not available')}\n`;
+    text += `🏷️ *Category:* ${this.escapeMarkdown(venue.category || 'Category not available')}\n`;
+    
+    // Ratings and Price section
+    let ratings = [];
+    if (venue.rating !== 'No rating') {
+      ratings.push(`⭐ Rating: ${this.escapeMarkdown(venue.rating)}`);
+    }
+    if (venue.price !== 'Price not available') {
+      ratings.push(`💰 Price: ${this.escapeMarkdown(venue.price)}`);
+    }
+    if (ratings.length > 0) {
+      text += `\n${ratings.join(' • ')}\n`;
+    }
+    
+    // Hours and Distance
+    if (venue.hours?.display) {
+      text += `\n🕒 *Hours:* ${this.escapeMarkdown(venue.hours.display)}\n`;
+    }
+    if (venue.distance) {
+      text += `📏 *Distance:* ${this.escapeMarkdown(venue.distance)}\n`;
+    }
+    
+    // Tips or Highlights if available
+    if (venue.description) {
+      text += `\n📝 *Description:*\n${this.escapeMarkdown(venue.description)}\n`;
+    }
+    
+    // Contact Info
+    if (venue.tel) {
+      text += `\n📞 *Phone:* ${this.escapeMarkdown(venue.tel)}\n`;
+    }
+    if (venue.website) {
+      text += `🌐 *Website:* ${this.escapeMarkdown(venue.website)}\n`;
+    }
+    
+    // Add Foursquare link
+    if (venue.fsq_id) {
+      text += `\n🔗 [View on Foursquare](${this.createFoursquareUrl(venue.fsq_id)})\n`;
+    }
+
+    // Create keyboard with useful actions
+    const keyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: '📍 Open in Maps',
+            url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue.name + ' ' + (venue.address || ''))}`
+          }
+        ],
+        [
+          {
+            text: '🔙 Back to List',
+            callback_data: 'back_to_venues'
+          },
+          {
+            text: '📱 Share Venue',
+            callback_data: `share_venue_${venue.fsq_id}`
+          }
+        ]
+      ]
+    };
+
+    return { text, keyboard };
+  }
+
+  formatToolResult(result: any): { text: string; keyboard?: any } {
+    if (!result.success) {
+      return this.formatError(result.result);
+    }
+
+    let data = result.result;
+    if (typeof data === 'string') {
+      try {
+        data = JSON.parse(data);
+      } catch (e) {
+        return { text: data };
+      }
+    }
+
+    if (data.venues) {
+      return this.formatVenueList(data);
+    }
+
+    return {
+      text: typeof data === 'string' ? data : JSON.stringify(data, null, 2)
+    };
+  }
+
+  formatError(error: string): { text: string } {
+    return {
+      text: `❌ Error: ${this.escapeMarkdown(error)}`
+    };
+  }
+}

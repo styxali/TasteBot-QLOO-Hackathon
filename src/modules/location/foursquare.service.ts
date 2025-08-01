@@ -1,55 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
-
-interface FoursquareVenue {
-  fsq_id: string;
-  name: string;
-  location: {
-    address?: string;
-    locality?: string;
-    region?: string;
-    country?: string;
-    formatted_address?: string;
-  };
-  categories: Array<{
-    id: number;
-    name: string;
-    icon: {
-      prefix: string;
-      suffix: string;
-    };
-  }>;
-  distance?: number;
-  rating?: number;
-  price?: number;
-  photos?: Array<{
-    id: string;
-    prefix: string;
-    suffix: string;
-    width: number;
-    height: number;
-  }>;
-  hours?: {
-    open_now?: boolean;
-    display?: string;
-  };
-}
-
-interface FoursquareSearchResponse {
-  results: FoursquareVenue[];
-  context?: {
-    geo_bounds?: {
-      circle: {
-        center: {
-          latitude: number;
-          longitude: number;
-        };
-        radius: number;
-      };
-    };
-  };
-}
+import { FoursquareVenue, FoursquareSearchResponse } from './interfaces/foursquare.interface';
 
 @Injectable()
 export class FoursquareService {
@@ -57,7 +9,15 @@ export class FoursquareService {
   private baseUrl = 'https://api.foursquare.com/v3';
 
   constructor(private readonly configService: ConfigService) {
-    this.apiKey = this.configService.get<string>('foursquare.apiKey');
+    this.apiKey = this.configService.get<string>('FOURSQUARE_API_KEY');
+    
+    if (!this.apiKey) {
+      console.warn('Foursquare API key not found in configuration');
+      console.debug('Environment variable value:', process.env.FOURSQUARE_API_KEY);
+      console.debug('Config service value:', this.configService.get('FOURSQUARE_API_KEY'));
+    } else {
+      console.log('Foursquare API key configured successfully');
+    }
   }
 
   async searchVenues(
@@ -67,6 +27,7 @@ export class FoursquareService {
     limit = 10
   ): Promise<FoursquareVenue[]> {
     if (!this.apiKey) {
+      console.log(this.apiKey)
       console.warn('Foursquare API key not configured, using fallback data');
       return this.getFallbackVenues(query, location);
     }

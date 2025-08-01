@@ -4,7 +4,7 @@ import { User } from '@prisma/client';
 
 @Injectable()
 export class UserService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async createUser(telegramId: string, phoneNumber?: string): Promise<User> {
     return this.prisma.user.create({
@@ -27,13 +27,13 @@ export class UserService {
       console.log(`✅ Found existing user ${telegramId} with ${user.credits} credits`);
       return user;
     }
-    
+
     console.log(`🆕 Creating new user ${telegramId} with 5 free credits`);
     user = await this.createUser(telegramId, phoneNumber);
-    
+
     // Initialize empty taste profile
     await this.updateTasteProfile(telegramId, []);
-    
+
     return user;
   }
 
@@ -44,7 +44,7 @@ export class UserService {
     });
   }
 
-  async deductCredits(telegramId: string, amount: number = 1): Promise<User> {
+  async deductCredit(telegramId: string, amount: number = 1): Promise<User> {
     return this.prisma.user.update({
       where: { telegramId: BigInt(telegramId) },
       data: {
@@ -74,7 +74,7 @@ export class UserService {
   async updateTasteProfile(telegramId: string, tasteProfile: any): Promise<User> {
     // First ensure user exists
     const user = await this.findOrCreate(telegramId);
-    
+
     // Update or create taste profile
     await this.prisma.tasteProfile.upsert({
       where: { userId: user.id },
@@ -95,7 +95,7 @@ export class UserService {
       where: { telegramId: BigInt(telegramId) },
       include: { tasteProfile: true },
     });
-    
+
     return {
       keywords: user?.tasteProfile?.tasteKeywords || [],
       preferences: user?.tasteProfile?.tasteKeywords || [],

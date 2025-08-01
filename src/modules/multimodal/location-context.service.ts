@@ -58,7 +58,7 @@ export class LocationContextService {
       return {
         coordinates: { latitude, longitude },
         address: {
-          formatted: addressInfo?.display_name || 'Unknown location',
+          formatted: addressInfo?.formatted || 'Unknown location',
           city: addressInfo?.address?.city || 'Unknown city',
           country: addressInfo?.address?.country || 'Unknown country',
           neighborhood: this.extractNeighborhood(addressInfo),

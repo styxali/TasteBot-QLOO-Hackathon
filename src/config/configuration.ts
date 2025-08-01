@@ -15,6 +15,10 @@ export default () => ({
     apiKey: process.env.QLOO_API_KEY,
     apiUrl: process.env.QLOO_API_URL || 'https://hackathon.api.qloo.com',
   },
+
+  foursquare: {
+    apiKey: process.env.FOURSQUARE_API_KEY || '',
+  },
   
   llm: {
     openai: {

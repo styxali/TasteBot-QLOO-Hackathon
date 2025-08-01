@@ -47,6 +47,59 @@ export class FallbackSystemService {
     },
   };
 
+    async handleNavigationError(chatId: number, error: any): Promise<void> {
+    const errorMessage = error?.message || 'Unknown error';
+    const fallbackMessage = '❌ Navigation error: ' + errorMessage + '\n\nPlease try one of these options:\n' +
+      '1. Go back to the main menu\n' +
+      '2. Try a different option\n' +
+      '3. Type your request in natural language';
+
+    // Log the error for monitoring
+    console.error('Navigation error:', {
+      chatId,
+      error: errorMessage,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Update service health status
+    this.updateServiceHealth('navigation', false, errorMessage);
+
+    // Return user-friendly message
+    return Promise.resolve();
+  }
+
+  private updateServiceHealth(
+    serviceName: string, 
+    isHealthy: boolean, 
+    error?: string
+  ): void {
+    const health = this.serviceHealth.get(serviceName) || {
+      serviceName,
+      isHealthy: true,
+      lastCheck: new Date(),
+      failureCount: 0,
+    };
+
+    if (!isHealthy) {
+      health.failureCount++;
+      health.lastError = error;
+
+      // Check circuit breaker threshold
+      const config = this.fallbackConfigs[serviceName];
+      if (config && health.failureCount >= config.circuitBreakerThreshold) {
+        this.circuitBreakers.set(serviceName, true);
+      }
+    } else {
+      health.failureCount = 0;
+      health.lastError = undefined;
+      this.circuitBreakers.set(serviceName, false);
+    }
+
+    health.isHealthy = isHealthy;
+    health.lastCheck = new Date();
+    this.serviceHealth.set(serviceName, health);
+  }
+
   async executeWithFallback<T>(
     serviceName: string,
     primaryOperation: () => Promise<T>,

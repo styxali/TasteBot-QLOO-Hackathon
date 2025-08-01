@@ -9,6 +9,7 @@ import { VoiceProcessingService } from '../multimodal/voice-processing.service';
 import { LocationContextService } from '../multimodal/location-context.service';
 import { CulturalIntelligenceService } from '../cultural/cultural-intelligence.service';
 import { FallbackSystemService } from '../error-handling/fallback-system.service';
+import { Logger } from '@nestjs/common';
 
 interface TelegramMessage {
     message_id: number;
@@ -49,6 +50,13 @@ interface TelegramUpdate {
         message: TelegramMessage;
         data: string;
     };
+}
+
+interface TelegramKeyboard {
+    inline_keyboard: Array<Array<{
+        text: string;
+        callback_data: string;
+    }>>;
 }
 
 @Injectable()
@@ -151,7 +159,7 @@ export class EnhancedTelegramService {
         query: string,
         userId: string,
         chatId: number,
-        session: NavigationState
+        _session: NavigationState
     ): Promise<void> {
         try {
             // Get user context
@@ -161,10 +169,10 @@ export class EnhancedTelegramService {
             const enhancedContext = {
                 userId,
                 telegramId: userId,
-                currentNode: session.currentNodeId,
+                currentNode: _session.currentNodeId,
                 conversationHistory: userContext.recentMessages,
                 tasteProfile: userContext.tasteProfile,
-                sessionData: session.sessionData,
+                sessionData: _session.sessionData,
             };
 
             // Execute with fallback
@@ -330,28 +338,49 @@ export class EnhancedTelegramService {
     }
 
     private async handleCallbackQuery(callbackQuery: any): Promise<void> {
-        const userId = callbackQuery.from.id.toString();
-        const chatId = callbackQuery.message.chat.id;
-        const data = callbackQuery.data;
+        try {
+            const userId = callbackQuery.from.id.toString();
+            const chatId = callbackQuery.message.chat.id;
+            const data = callbackQuery.data;
 
-        let session = this.userSessions.get(callbackQuery.from.id);
-        if (!session) {
-            session = this.navigationRouter.createInitialState();
-            this.userSessions.set(callbackQuery.from.id, session);
+            this.logger.debug('🔘 Callback query received:', {
+                data,
+                userId,
+                chatId
+            });
+
+            let session = this.userSessions.get(callbackQuery.from.id);
+            if (!session) {
+                session = this.navigationRouter.createInitialState();
+                this.userSessions.set(callbackQuery.from.id, session);
+            }
+
+            // Handle navigation callbacks
+            if (data.startsWith('nav_')) {
+                const nodeId = data.replace('nav_', '');
+                await this.handleNavigation(nodeId, chatId, userId);
+            } else if (data.startsWith('execute_')) {
+                const nodeId = data.replace('execute_', '');
+                await this.executeNodeAction(nodeId, userId, chatId, session);
+            } else if (data === 'test_button') {
+                // Test button handler for debugging
+                const testSession = this.navigationRouter.createInitialState();
+                const testResult = this.navigationRouter.navigateToNode('explore_location', testSession);
+                await this.sendNavigationResponse(chatId, testResult);
+            }
+
+            // Answer callback query
+            await this.answerCallbackQuery(callbackQuery.id);
+            this.logger.debug('✅ Callback query handled successfully');
+        } catch (error) {
+            this.logger.error('❌ Error in handleCallbackQuery:', error);
+            // Make sure chatId is still accessible in catch block
+            await this.fallbackSystemService.handleNavigationError(
+                callbackQuery.message.chat.id,
+                error
+            );
+            await this.answerCallbackQuery(callbackQuery.id);
         }
-
-        // Handle navigation callbacks
-        if (data.startsWith('nav_')) {
-            const nodeId = data.replace('nav_', '');
-            const navResult = this.navigationRouter.navigateToNode(nodeId, session);
-            await this.sendNavigationResponse(chatId, navResult);
-        } else if (data.startsWith('execute_')) {
-            const nodeId = data.replace('execute_', '');
-            await this.executeNodeAction(nodeId, userId, chatId, session);
-        }
-
-        // Answer callback query
-        await this.answerCallbackQuery(callbackQuery.id);
     }
 
     private async executeNodeAction(
@@ -397,15 +426,101 @@ export class EnhancedTelegramService {
         }
     }
 
-    private async sendNavigationResponse(chatId: number, navResult: any): Promise<void> {
-        const keyboard = {
-            inline_keyboard: navResult.buttons.map((button: any) => [{
-                text: button.text,
-                callback_data: button.callbackData,
-            }]),
-        };
+    private readonly logger = new Logger(EnhancedTelegramService.name);
 
-        await this.sendMessage(chatId, navResult.message, keyboard);
+    private async sendNavigationResponse(chatId: number, navResult: any): Promise<void> {
+        try {
+            this.logger.debug(`🧭 Sending navigation response for chat ${chatId}`);
+            const keyboard = this.convertNavigationButtonsToKeyboard(navResult.buttons);
+            
+            this.logger.debug('⌨️ Generated keyboard:', JSON.stringify(keyboard, null, 2));
+            await this.sendMessage(chatId, navResult.message, keyboard);
+            this.logger.debug('✅ Navigation response sent successfully');
+        } catch (error) {
+            this.logger.error('❌ Error in sendNavigationResponse:', error);
+            throw error;
+        }
+    }
+
+    private convertNavigationButtonsToKeyboard(buttons: any[]): TelegramKeyboard {
+        try {
+            const rows = [];
+            // Organize buttons into rows of 2
+            for (let i = 0; i < buttons.length; i += 2) {
+                const row = buttons.slice(i, i + 2).map(button => ({
+                    text: button.text,
+                    callback_data: button.callbackData
+                }));
+                rows.push(row);
+            }
+
+            // Add test button in development mode
+            if (process.env.NODE_ENV === 'development') {
+                rows.push([{
+                    text: '🧪 Test Button',
+                    callback_data: 'test_button'
+                }]);
+            }
+
+            return { inline_keyboard: rows };
+        } catch (error) {
+            this.logger.error('❌ Error in convertNavigationButtonsToKeyboard:', error);
+            throw error;
+        }
+    }
+
+    private async handleNavigation(nodeId: string, chatId: number, telegramId: string): Promise<void> {
+        try {
+            this.logger.debug(`🧭 Navigating to node: ${nodeId}`);
+            
+            // Get or create user session
+            let session = this.userSessions.get(Number(telegramId));
+            if (!session) {
+                session = this.navigationRouter.createInitialState();
+                this.userSessions.set(Number(telegramId), session);
+            }
+
+            session.userContext = { 
+                telegramId,
+                lastNodeId: session.currentNodeId // Track previous node for back navigation
+            };
+            
+            this.logger.debug('📍 Current session state:', {
+                currentNodeId: session.currentNodeId,
+                breadcrumbs: session.breadcrumbs,
+                sessionData: session.sessionData
+            });
+
+            const navResult = this.navigationRouter.navigateToNode(nodeId, session);
+
+            this.logger.debug('🎯 Navigation result:', {
+                node: navResult.node.id,
+                buttonsCount: navResult.buttons?.length || 0,
+                messageLength: navResult.message?.length || 0,
+                requiresInput: navResult.requiresInput
+            });
+
+            // Update user session with new state
+            this.userSessions.set(Number(telegramId), session);
+
+            await this.sendNavigationResponse(chatId, navResult);
+        } catch (error) {
+            this.logger.error('❌ Error in handleNavigation:', {
+                nodeId,
+                chatId,
+                telegramId,
+                error: error.message,
+                stack: error.stack
+            });
+
+            // Use fallback system
+            await this.fallbackSystemService.handleNavigationError(chatId, error);
+            
+            // Try to recover by going to root node
+            const session = this.navigationRouter.createInitialState();
+            const rootResult = this.navigationRouter.navigateToNode('root', session);
+            await this.sendNavigationResponse(chatId, rootResult);
+        }
     }
 
     private async sendMessage(chatId: number, text: string, replyMarkup?: any): Promise<void> {
@@ -472,7 +587,7 @@ export class EnhancedTelegramService {
         }
     }
 
-    private async getSimpleResponse(query: string, tasteProfile: any): Promise<any> {
+    private async getSimpleResponse(query: string, _tasteProfile: any): Promise<any> {
         return {
             success: true,
             result: `I understand you're looking for "${query}". Let me help you find something that matches your taste!`,

@@ -11,27 +11,47 @@ export class QlooTagsTool extends BaseTool {
     type: 'object' as const,
     properties: {
       entityId: { type: 'string', description: 'Entity ID to get tags for' },
+      query: { type: 'string', description: 'Search query for tags' },
+      tagTypes: { type: 'array', description: 'Array of tag types to filter by' },
+      take: { type: 'number', description: 'Maximum number of tags to return' },
     },
-    required: ['entityId'],
+    required: [],
   };
 
   constructor(private readonly qlooService: QlooService) {
     super();
   }
 
-  async execute(params: { entityId: string }, context: UserContext): Promise<ToolResult> {
+  async execute(params: { entityId?: string; query?: string; tagTypes?: string[]; take?: number }, _context: UserContext): Promise<ToolResult> {
     try {
-      if (!this.validateParams(params, ['entityId'])) {
-        return this.createErrorResult('Missing required parameter: entityId');
-      }
-
-      console.log(`🏷️ Getting tags for entity: ${params.entityId}`);
+      console.log(`🏷️ Getting tags with params:`, params);
       
-      const tags = await this.qlooService.getTags(params.entityId);
+      let tags = [];
+      
+      if (params.entityId) {
+        // Get taste analysis for specific entity
+        tags = await this.qlooService.getTasteAnalysis({
+          entities: [params.entityId],
+          tagTypes: params.tagTypes,
+        });
+      } else if (params.query) {
+        // Search for tags by query
+        tags = await this.qlooService.searchTags({
+          query: params.query,
+          tagTypes: params.tagTypes,
+          take: params.take || 10
+        });
+      } else {
+        // Get general tag types
+        tags = await this.qlooService.getTagTypes({
+          take: params.take || 20
+        });
+      }
       
       const result = this.createSuccessResult(tags, {
         toolName: 'qloo_tags',
         entityId: params.entityId,
+        query: params.query,
         tagCount: tags.length,
       });
 

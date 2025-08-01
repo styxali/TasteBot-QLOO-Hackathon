@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ToolRegistry } from './tool-registry.service';
 import { OrchestrationResult, UserContext } from '../../common/interfaces/tool.interface';
-import { ChatOpenAI } from '@langchain/openai';
-import { PromptTemplate } from '@langchain/core/prompts';
+import { ChatOpenAI } from 'langchain/chat_models/openai';
+import { PromptTemplate } from 'langchain/prompts';
 import { LLMChain } from 'langchain/chains';
 
 @Injectable()
@@ -54,36 +54,18 @@ For lists, number the items and keep each entry concise.
       
       if (selectedTool) {
         const params = this.extractParams(query, selectedTool.name);
+        const result = await selectedTool.execute(params, context);
         
-        try {
-          const result = await selectedTool.execute(params, context);
+        if (result.success) {
+          const formattedResult = await this.formatResult(result.data, selectedTool.name);
           
-          if (result.success) {
-            let formattedResult;
-            if (typeof result.data === 'string' && result.data.includes('API key is invalid')) {
-              formattedResult = '⚠️ Sorry, there seems to be an issue with the API connection. Please try again later or contact support if this persists.';
-            } else {
-              formattedResult = await this.formatResult(result.data, selectedTool.name);
-            }
-            
-            return {
-              success: true,
-              result: formattedResult,
-              response: formattedResult,
-              toolsUsed: [selectedTool.name],
-              executionTime: Date.now() - startTime,
-              data: result.data,
-            };
-          }
-        } catch (toolError) {
-          console.error(`Tool execution error (${selectedTool.name}):`, toolError);
           return {
-            success: false,
-            result: '⚠️ Sorry, I encountered an error while fetching the data. Please try again or rephrase your request.',
-            response: '⚠️ Sorry, I encountered an error while fetching the data. Please try again or rephrase your request.',
+            success: true,
+            result: formattedResult,
+            response: formattedResult,
             toolsUsed: [selectedTool.name],
             executionTime: Date.now() - startTime,
-            error: toolError.message,
+            data: result.data,
           };
         }
       }
@@ -152,18 +134,6 @@ For lists, number the items and keep each entry concise.
     if (!data) return 'No results found.';
 
     try {
-      // Handle error messages or invalid data
-      if (typeof data === 'string') {
-        if (data.includes('error') || data.includes('invalid')) {
-          return `⚠️ ${data}`;
-        }
-        try {
-          data = JSON.parse(data);
-        } catch {
-          return data;
-        }
-      }
-
       // Use LangChain to format the result
       const chain = new LLMChain({ llm: this.llm, prompt: this.formatPrompt });
       const response = await chain.call({
@@ -171,14 +141,7 @@ For lists, number the items and keep each entry concise.
         toolName,
       });
 
-      const formattedText = response.text || this.fallbackFormat(data);
-      
-      // Ensure the response is not JSON
-      if (formattedText.trim().startsWith('{') || formattedText.trim().startsWith('[')) {
-        return this.fallbackFormat(data);
-      }
-
-      return formattedText;
+      return response.text || 'No results found.';
     } catch (error) {
       console.error('Error formatting result with LLM:', error);
       // Fallback to basic formatting if LLM fails

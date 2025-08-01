@@ -4,19 +4,62 @@ import axios from 'axios';
 
 export interface GeoapifyPlace {
   place_id: string;
+  name: string;
+  formatted: string;
   display_name: string;
-  lat: number;
-  lon: number;
   address: {
-    house_number?: string;
-    road?: string;
     city?: string;
-    state?: string;
     country?: string;
+    state?: string;
     postcode?: string;
+    street?: string;
+    house_number?: string;
   };
+  address_line1?: string;
+  address_line2?: string;
+  categories?: string[];
   category?: string;
   type?: string;
+  lat: number;
+  lon: number;
+  distance?: number;
+  website?: string;
+  opening_hours?: string;
+  contact?: {
+    phone?: string;
+    email?: string;
+  };
+  facilities?: {
+    internet_access?: boolean;
+    wheelchair?: boolean;
+    outdoor_seating?: boolean;
+    takeaway?: boolean;
+    delivery?: boolean;
+    air_conditioning?: boolean;
+    smoking?: boolean;
+  };
+  catering?: {
+    cuisine?: string;
+    capacity?: number;
+    diet?: {
+      vegan?: boolean;
+    };
+  };
+  payment_options?: {
+    cash?: boolean;
+    debit_cards?: boolean;
+    credit_cards?: boolean;
+  };
+  brand?: string;
+  brand_details?: {
+    wikidata?: string;
+  };
+  wiki_and_media?: {
+    wikidata?: string;
+    wikipedia?: string;
+  };
+  cultural_significance?: number;
+  ambiance_score?: number;
 }
 
 @Injectable()
@@ -85,12 +128,14 @@ export class GeoapifyService {
 
       return {
         place_id: feature.properties.place_id,
+        name: feature.properties.name || '',
+        formatted: feature.properties.formatted,
         display_name: feature.properties.formatted,
         lat: feature.geometry.coordinates[1],
         lon: feature.geometry.coordinates[0],
         address: {
           house_number: feature.properties.housenumber,
-          road: feature.properties.street,
+          street: feature.properties.street,
           city: feature.properties.city,
           state: feature.properties.state,
           country: feature.properties.country,

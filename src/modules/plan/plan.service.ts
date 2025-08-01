@@ -81,7 +81,7 @@ Make it feel personal and exciting!`;
       }
 
       // Deduct credit ONLY after successful generation
-      await this.userService.deductCredits(telegramId, 1);
+      await this.userService.deductCredit(telegramId, 1);
       console.log(`💳 Deducted 1 credit from user ${telegramId}`);
 
       return {

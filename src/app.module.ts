@@ -24,6 +24,8 @@ import { SearchModule } from './modules/search/search.module';
 import { CulturalModule } from './modules/cultural/cultural.module';
 import { ErrorHandlingModule } from './modules/error-handling/error-handling.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
+import { ProfileEnhancementModule } from './modules/profile/profile.module';
+import { HeatmapVisualizationModule } from './modules/visualization/visualization.module';
 
 @Module({
   imports: [
@@ -48,6 +50,10 @@ import { PrismaModule } from './modules/prisma/prisma.module';
     LocationModule,
     StripeModule,
     SessionModule,
+    
+    // Profile enhancement and visualization
+    ProfileEnhancementModule,
+    HeatmapVisualizationModule,
     LangChainModule,
     NavigationModule,
     MemoryModule,

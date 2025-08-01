@@ -25,11 +25,11 @@ export class NavigationRouter {
     return null;
   }
 
-  navigateToNode(nodeId: string, state: NavigationState): NavigationResult {
+  navigateToNode(nodeId: string, state: NavigationState): NavigationResult & { success: boolean; currentNode?: NavigationNode } {
     const node = this.getNode(nodeId);
     
     if (!node) {
-      return this.getErrorResult('Node not found');
+      return { ...this.getErrorResult('Node not found'), success: false };
     }
 
     // Update navigation state
@@ -37,7 +37,8 @@ export class NavigationRouter {
     this.updateBreadcrumbs(state, node);
 
     // Generate navigation result
-    return this.generateNavigationResult(node, state);
+    const result = this.generateNavigationResult(node, state);
+    return { ...result, success: true, currentNode: node };
   }
 
   private updateBreadcrumbs(state: NavigationState, node: NavigationNode): void {

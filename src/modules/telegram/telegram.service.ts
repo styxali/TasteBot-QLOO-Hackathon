@@ -3,164 +3,513 @@ import { ConfigService } from '@nestjs/config';
 import { UserService } from '../user/user.service';
 import { PlanService } from '../plan/plan.service';
 import { SessionService } from '../session/session.service';
-import { string } from 'joi';
-import { text } from 'express';
+import { NavigationRouter } from '../navigation/navigation-router.service';
+import { LangChainOrchestrator } from '../langchain/langchain-orchestrator.service';
+import { MemorySystem } from '../memory/memory-system.service';
+import { ResponseFormatterService } from './response-formatter.service';
+import { ErrorLoggerService } from '../../common/logger/error-logger.service';
 
 @Injectable()
 export class TelegramService {
   private botToken: string;
+  private userSessions = new Map<string, any>();
+  private userSelectionContext = new Map<string, any>();
 
   constructor(
     private readonly configService: ConfigService,
     private readonly userService: UserService,
     private readonly planService: PlanService,
     private readonly sessionService: SessionService,
+    private readonly navigationRouter: NavigationRouter,
+    private readonly langChainOrchestrator: LangChainOrchestrator,
+    private readonly memorySystem: MemorySystem,
+    private readonly responseFormatter: ResponseFormatterService,
+    private readonly errorLogger: ErrorLoggerService,
   ) {
     this.botToken = this.configService.get<string>('telegram.botToken');
   }
 
   async processUpdate(update: any): Promise<void> {
-    if (update.message) {
-      if (update.message.voice) {
-        await this.handleVoiceMessage(update.message);
-      } else if (update.message.photo) {
-        await this.handlePhotoMessage(update.message);
-      } else if (update.message.location) {
-        await this.handleLocationMessage(update.message);
+    console.log('📥 Received update:', JSON.stringify(update, null, 2));
+    
+    try {
+      if (update.message) {
+        console.log('💬 Processing message update');
+        if (update.message.voice) {
+          await this.handleVoiceMessage(update.message);
+        } else if (update.message.photo) {
+          await this.handlePhotoMessage(update.message);
+        } else if (update.message.location) {
+          await this.handleLocationMessage(update.message);
+        } else {
+          await this.handleMessage(update.message);
+        }
+      } else if (update.callback_query) {
+        console.log('🔘 Processing callback query update');
+        await this.handleCallbackQuery(update.callback_query);
       } else {
-        await this.handleMessage(update.message);
+        console.log('❓ Unknown update type:', Object.keys(update));
       }
-    } else if (update.callback_query) {
-      await this.handleCallbackQuery(update.callback_query);
+    } catch (error) {
+      this.errorLogger.logError('processUpdate', error, { update });
+      const chatId = update.message?.chat.id || update.callback_query?.message.chat.id;
+      if (chatId) {
+        await this.sendMessage(chatId, '❌ Sorry, I encountered an error. Please try again or type /help for assistance.');
+      }
     }
   }
 
   private async handleMessage(message: any): Promise<void> {
     const telegramId = message.from.id.toString();
+    const chatId = message.chat.id;
     
-    // ALWAYS ensure user exists first with proper profile
+    // Ensure user exists
     const user = await this.userService.findOrCreate(telegramId);
     console.log(`👤 User ${telegramId} - Credits: ${user.credits}`);
 
-    // Skip conversation history for now
-
-    if (message.text === '/start') {
-      await this.sendWelcomeMessage(message.chat.id);
+    // Handle commands
+    if (message.text?.startsWith('/')) {
+      await this.handleCommand(message.text, chatId, telegramId);
       return;
     }
 
-    if (message.text === '/credits') {
-      const balance = await this.userService.checkBalance(telegramId);
-      await this.sendMessage(message.chat.id, `You have ${balance} credits remaining.`);
+    // Handle conversational messages (greetings, simple responses)
+    if (this.isConversationalMessage(message.text)) {
+      await this.handleConversationalMessage(message.text, chatId, telegramId);
       return;
     }
 
-    if (message.text === '/mood') {
-      await this.sendMessage(message.chat.id, 'What\'s your current mood? (e.g., chill, energetic, romantic, adventurous)');
+    // Handle interactive selections (1, 2, 3, etc.)
+    const selectionContext = this.userSelectionContext.get(telegramId);
+    if (selectionContext && this.isNumericSelection(message.text)) {
+      await this.handleInteractiveSelection(message.text, chatId, telegramId, selectionContext);
       return;
     }
 
-    if (message.text === '/demo') {
-      await this.sendDemoFlow(message.chat.id);
-      return;
-    }
+    // Store conversation message
+    await this.memorySystem.storeConversationMessage({
+      id: `${message.message_id}_${Date.now()}`,
+      userId: telegramId,
+      content: message.text || '[non-text message]',
+      type: 'user',
+      timestamp: new Date(),
+      metadata: {
+        messageType: 'text',
+        chatId: chatId.toString(),
+      },
+    });
 
-    if (message.text === '/buy') {
-      await this.sendBuyCreditsMessage(message.chat.id);
-      return;
-    }
-
-    if (message.text === '/profile') {
-      await this.sendProfileInfo(telegramId, message.chat.id);
-      return;
-    }
-
-    if (message.text === '/taste') {
-      await this.sendTasteProfileInfo(telegramId, message.chat.id);
-      return;
-    }
-
-    if (message.text === '/help') {
-      await this.sendHelpMessage(message.chat.id);
-      return;
-    }
-
-    // Check for taste profile reset
-    if (message.text.toLowerCase().includes('reset my taste profile')) {
-      await this.userService.updateTasteProfile(telegramId, []);
-      await this.sendMessage(message.chat.id, '🔄 Your taste profile has been reset! Tell me what you love and I\'ll start learning your preferences again.');
-      return;
-    }
-
-    // Check if it's a mood update
-    if (await this.isMoodUpdate(message.text)) {
-      await this.sessionService.updateMood(telegramId, message.text);
-      await this.sendMessage(message.chat.id, `Got it! Your mood is now set to "${message.text}". This will help me give you better recommendations.`);
-      return;
-    }
-
-    // Extract and save taste preferences from message
+    // Extract and save taste preferences
     await this.extractAndSaveTasteProfile(telegramId, message.text);
 
     // Handle regular messages
     if (user.credits > 0) {
-      // Send processing message
-      await this.sendMessage(message.chat.id, 'Processing your request...');
+      await this.sendMessage(chatId, '🔄 Processing your request...');
       
-      const isFollowUp = await this.sessionService.isFollowUpMessage(telegramId, message.text);
-      
-      if (isFollowUp) {
-        const context = await this.sessionService.getConversationContext(telegramId);
-        const enhancedMessage = `${context} User says: ${message.text}`;
+      try {
+        // Get user context
+        const userContext = await this.memorySystem.getContextForUser(telegramId);
         
-        const plan = await this.planService.generatePlanForUser(telegramId, enhancedMessage);
-        if (plan) {
-          await this.sessionService.savePlanToContext(telegramId, plan);
-          const formattedPlan = this.planService.formatPlanForTelegram(plan);
-          await this.sendMessage(message.chat.id, formattedPlan, this.createQuickStartKeyboard());
-        }
-      } else {
-        // Check if user has enough profile info
-        const tasteProfile = await this.userService.getTasteProfile(telegramId);
-        const needsMoreInfo = await this.checkIfNeedsMoreProfileInfo(telegramId, message.text, tasteProfile);
-        
-        if (needsMoreInfo) {
-          await this.sendMessage(message.chat.id, needsMoreInfo);
-          return;
-        }
+        // Create enhanced context for LangChain
+        const enhancedContext = {
+          userId: telegramId,
+          telegramId,
+          conversationHistory: userContext.recentMessages,
+          tasteProfile: userContext.tasteProfile,
+          sessionData: this.userSessions.get(telegramId) || {},
+        };
 
-        const plan = await this.planService.generatePlanForUser(telegramId, message.text);
-        console.log('📋 Generated plan:', plan ? 'SUCCESS' : 'FAILED');
+        // Use LangChain orchestration
+        const result = await this.langChainOrchestrator.orchestrateTools(message.text, enhancedContext);
         
-        if (plan) {
-          await this.sessionService.savePlanToContext(telegramId, plan);
-          const formattedPlan = this.planService.formatPlanForTelegram(plan);
-          console.log('📝 Formatted plan length:', formattedPlan.length);
-          console.log('📝 Formatted plan preview:', formattedPlan.substring(0, 200));
-          
-          await this.sendMessage(message.chat.id, formattedPlan, this.createQuickStartKeyboard());
+        if (result.success) {
+          try {
+            // Format response based on result type
+            const formatted = this.responseFormatter.formatToolResult(result);
+            
+            // Store context for interactive selections
+            interface VenueResult {
+              interactive?: boolean;
+              venues?: any[];
+              query?: string;
+            }
+            
+            let resultData: VenueResult = {};
+            
+            if (typeof result.result === 'string' && result.result.trim().startsWith('{') && result.result.trim().endsWith('}')) {
+              try {
+                resultData = JSON.parse(result.result) as VenueResult;
+              } catch (parseError) {
+                console.warn('Failed to parse result as JSON:', parseError);
+              }
+            } else if (typeof result.result === 'object') {
+              resultData = result.result as VenueResult || {};
+            }
+
+            if (resultData?.interactive && resultData?.venues) {
+              this.userSelectionContext.set(telegramId, {
+                type: 'venue_list',
+                venues: resultData.venues,
+                query: resultData.query
+              });
+            }
+            
+            await this.sendMessage(chatId, formatted.text, formatted.keyboard || this.createNavigationKeyboard());
+
+            // Deduct credit
+            await this.userService.deductCredit(telegramId);
+            console.log(`💳 Credit deducted for ${telegramId}`);
+
+            // Store bot response
+            await this.memorySystem.storeConversationMessage({
+              id: `bot_${Date.now()}`,
+              userId: telegramId,
+              content: result.result,
+              type: 'bot',
+              timestamp: new Date(),
+              metadata: {
+                toolsUsed: result.toolsUsed || [],
+                executionTime: result.executionTime || 0,
+              },
+            });
+          } catch (error) {
+            console.error('Error processing successful result:', error);
+            await this.sendMessage(chatId, '❌ I had trouble processing the results. Please try again.');
+          }
         } else {
-          const keywords = this.extractKeywords(message.text);
-          const helpText = this.getContextualHelp(keywords, message.text);
-          await this.sendMessage(message.chat.id, helpText);
+          const errorFormatted = this.responseFormatter.formatError(result.result);
+          await this.sendMessage(chatId, errorFormatted.text, this.createNavigationKeyboard());
         }
+      } catch (error) {
+        this.errorLogger.logError('handleMessage', error, { telegramId, message: message.text });
+        await this.sendMessage(chatId, '❌ I had trouble processing your request. Could you try rephrasing it?');
       }
     } else {
-      await this.sendMessage(message.chat.id, `💳 You're out of credits! 
+      await this.sendOutOfCreditsMessage(chatId);
+    }
+  }
 
-You need credits to generate personalized plans. Each plan costs 1 credit.
+  private async handleCommand(command: string, chatId: number, telegramId: string): Promise<void> {
+    switch (command) {
+      case '/start':
+        await this.sendWelcomeMessage(chatId);
+        break;
+      case '/help':
+        await this.sendHelpMessage(chatId);
+        break;
+      case '/explore':
+        await this.sendExploreMenu(chatId);
+        break;
+      case '/nearby':
+        await this.sendNearbyOptions(chatId);
+        break;
+      case '/credits':
+        const balance = await this.userService.checkBalance(telegramId);
+        await this.sendMessage(chatId, `💳 You have **${balance} credits** remaining.\n\nEach personalized plan costs 1 credit.`);
+        break;
+      case '/buy':
+        await this.sendBuyCreditsMessage(chatId);
+        break;
+      case '/profile':
+        await this.sendProfileInfo(telegramId, chatId);
+        break;
+      case '/taste':
+        await this.sendTasteProfileInfo(telegramId, chatId);
+        break;
+      case '/demo':
+        await this.sendDemoFlow(chatId);
+        break;
+      default:
+        await this.sendMessage(chatId, '❓ Unknown command. Type /help for all available commands.');
+    }
+  }
 
-Use /buy to purchase more credits, or try these free commands:
-• /profile - View your profile
-• /taste - Manage taste preferences  
-• /demo - See examples
-• /credits - Check balance
+  private async handleCallbackQuery(callbackQuery: any): Promise<void> {
+    const telegramId = callbackQuery.from.id.toString();
+    const chatId = callbackQuery.message.chat.id;
+    const data = callbackQuery.data;
 
-Ready to get more credits? 🚀`, {
-        inline_keyboard: [
-          [{ text: '💳 Buy Credits', callback_data: 'buy_credits' }]
-        ]
+    console.log('🔘 Callback query received:', data);
+    console.log('🔘 From user:', telegramId);
+    console.log('🔘 Chat ID:', chatId);
+
+    // Answer the callback query FIRST
+    await this.answerCallbackQuery(callbackQuery.id);
+
+    try {
+      // Handle navigation callbacks
+      if (data.startsWith('nav_')) {
+        const nodeId = data.replace('nav_', '');
+        console.log('🧭 Navigation to node:', nodeId);
+        await this.handleNavigation(nodeId, chatId, telegramId);
+        return;
+      }
+
+      // Handle execute callbacks (leaf node actions)
+      if (data.startsWith('execute_')) {
+        const nodeId = data.replace('execute_', '');
+        console.log('⚡ Execute node:', nodeId);
+        await this.handleNodeExecution(nodeId, chatId, telegramId);
+        return;
+      }
+
+      // Handle prompt callbacks (input prompts)
+      if (data.startsWith('prompt_')) {
+        const nodeId = data.replace('prompt_', '');
+        console.log('💬 Prompt node:', nodeId);
+        await this.handleNodePrompt(nodeId, chatId, telegramId);
+        return;
+      }
+
+      // Handle other callbacks
+      console.log('🎯 Handling standard callback:', data);
+      switch (data) {
+        case 'test_button':
+          // Test navigation system directly
+          const testSession = this.navigationRouter.createInitialState();
+          const testResult = this.navigationRouter.navigateToNode('explore_location', testSession);
+          
+          let testMessage = '🧪 **Test Button Works!**\n\n';
+          testMessage += `Navigation test result:\n`;
+          testMessage += `✅ Success: ${testResult.success}\n`;
+          testMessage += `📝 Message: ${testResult.message?.substring(0, 100)}...\n`;
+          testMessage += `🔘 Buttons: ${testResult.buttons?.length || 0}\n\n`;
+          
+          if (testResult.success && testResult.buttons?.length > 0) {
+            testMessage += `First button: ${testResult.buttons[0].text} -> ${testResult.buttons[0].callbackData}\n\n`;
+          }
+          
+          testMessage += 'Now let\'s test navigation...';
+          
+          await this.sendMessage(chatId, testMessage, this.createNavigationKeyboard());
+          break;
+        case 'get_plan':
+          await this.sendMessage(chatId, '🎯 Tell me what you\'re looking for!\n\n**Examples:**\n• "Jazz bars in Lisbon"\n• "Cozy cafes for work"\n• "Cyberpunk night out vibes"\n• "Romantic dinner spots"\n\n💡 What would you like to explore?', this.createNavigationKeyboard());
+          break;
+        case 'buy_credits':
+          await this.sendBuyCreditsMessage(chatId);
+          break;
+        case 'help':
+          await this.sendHelpMessage(chatId);
+          break;
+        case 'demo':
+          await this.sendDemoFlow(chatId);
+          break;
+        default:
+          console.log('❓ Unknown callback data:', data);
+          await this.sendMessage(chatId, `I received: "${data}"\n\nSorry, I didn\'t understand that option. Try typing what you\'re looking for!`, this.createNavigationKeyboard());
+      }
+    } catch (error) {
+      console.error('❌ Error in handleCallbackQuery:', error);
+      await this.sendMessage(chatId, '❌ Sorry, something went wrong with that button. Please try again.', this.createNavigationKeyboard());
+    }
+  }
+
+  private async handleNodeExecution(nodeId: string, chatId: number, telegramId: string): Promise<void> {
+    const node = this.navigationRouter.getNode(nodeId);
+    
+    if (!node || !node.toolName) {
+      await this.sendMessage(chatId, '❌ Action not available', this.createNavigationKeyboard());
+      return;
+    }
+
+    const user = await this.userService.findOrCreate(telegramId);
+    
+    if (user.credits <= 0) {
+      await this.sendOutOfCreditsMessage(chatId);
+      return;
+    }
+
+    await this.sendMessage(chatId, `🔧 Executing ${node.title}...`);
+
+    try {
+      // Get user context
+      const userContext = await this.memorySystem.getContextForUser(telegramId);
+      
+      // Create enhanced context for LangChain
+      const enhancedContext = {
+        userId: telegramId,
+        telegramId,
+        conversationHistory: userContext.recentMessages,
+        tasteProfile: userContext.tasteProfile,
+        sessionData: this.userSessions.get(telegramId) || {},
+      };
+
+      // Execute the tool associated with this node
+      const toolQuery = `Execute ${node.toolName} for ${node.title}`;
+      const result = await this.langChainOrchestrator.orchestrateTools(toolQuery, enhancedContext);
+      
+      if (result.success) {
+        const formattedResponse = this.formatResponseWithNavigation(result.result);
+        await this.sendMessage(chatId, formattedResponse, this.createNavigationKeyboard());
+        
+        // Deduct credit
+        await this.userService.deductCredit(telegramId);
+        console.log(`💳 Credit deducted for ${telegramId}`);
+      } else {
+        await this.sendMessage(chatId, `❌ ${result.result}`, this.createNavigationKeyboard());
+      }
+    } catch (error) {
+      console.error('❌ Node execution error:', error);
+      await this.sendMessage(chatId, '❌ Sorry, I encountered an error executing that action.', this.createNavigationKeyboard());
+    }
+  }
+
+  private async handleNodePrompt(nodeId: string, chatId: number, telegramId: string): Promise<void> {
+    const node = this.navigationRouter.getNode(nodeId);
+    
+    if (!node || !node.promptText) {
+      await this.sendMessage(chatId, '❌ Prompt not available', this.createNavigationKeyboard());
+      return;
+    }
+
+    const promptMessage = `💬 **${node.title}**\n\n${node.promptText}\n\n**Just type your response and I'll help you!**`;
+    
+    await this.sendMessage(chatId, promptMessage, this.createNavigationKeyboard());
+  }
+
+  private async handleNavigation(nodeId: string, chatId: number, telegramId: string): Promise<void> {
+    try {
+      console.log(`🧭 Navigating to node: ${nodeId}`);
+      
+      // Get or create navigation session
+      let session = this.userSessions.get(telegramId);
+      if (!session) {
+        session = this.navigationRouter.createInitialState();
+        this.userSessions.set(telegramId, session);
+        console.log('🆕 Created new navigation session');
+      }
+
+      console.log('📍 Current session state:', session);
+
+      // Navigate to the node
+      const navResult = this.navigationRouter.navigateToNode(nodeId, session);
+      
+      console.log('🎯 Navigation result:', {
+        success: navResult.success,
+        buttonsCount: navResult.buttons?.length || 0,
+        messageLength: navResult.message?.length || 0
       });
+      
+      if (navResult.success) {
+        // Convert navigation buttons to Telegram keyboard format
+        const keyboard = this.convertNavigationButtonsToKeyboard(navResult.buttons);
+        console.log('⌨️ Generated keyboard:', JSON.stringify(keyboard, null, 2));
+        await this.sendMessage(chatId, navResult.message, keyboard);
+      } else {
+        console.log('❌ Navigation failed for node:', nodeId);
+        await this.sendMessage(chatId, `❌ Navigation error for "${nodeId}". Please try again.`, this.createNavigationKeyboard());
+      }
+    } catch (error) {
+      console.error('❌ Navigation error:', error);
+      await this.sendMessage(chatId, '❌ Sorry, I had trouble with navigation. Please try again.', this.createNavigationKeyboard());
+    }
+  }
+
+  private convertNavigationButtonsToKeyboard(buttons: any[]): any {
+    if (!buttons || buttons.length === 0) {
+      return this.createNavigationKeyboard();
+    }
+
+    // Group buttons into rows (2 buttons per row for better mobile UX)
+    const rows = [];
+    for (let i = 0; i < buttons.length; i += 2) {
+      const row = buttons.slice(i, i + 2).map(button => ({
+        text: button.text,
+        callback_data: button.callbackData
+      }));
+      rows.push(row);
+    }
+
+    return {
+      inline_keyboard: rows
+    };
+  }
+
+  private async handleVoiceMessage(message: any): Promise<void> {
+    const telegramId = message.from.id.toString();
+    const chatId = message.chat.id;
+    
+    try {
+      await this.sendMessage(chatId, '🎙️ Voice message received! Processing...');
+      
+      // For MVP, simulate transcription
+      const transcribedText = 'I want a chill plan for tonight with good music and food';
+      
+      await this.sendMessage(chatId, `🎤 I heard: "${transcribedText}"`);
+      
+      // Process as regular text message
+      const simulatedMessage = {
+        ...message,
+        text: transcribedText
+      };
+      
+      await this.handleMessage(simulatedMessage);
+      
+    } catch (error) {
+      console.error('❌ Voice processing error:', error);
+      await this.sendMessage(chatId, '🎙️ Sorry, I couldn\'t process your voice message. Please try typing instead.');
+    }
+  }
+
+  private async handlePhotoMessage(message: any): Promise<void> {
+    const telegramId = message.from.id.toString();
+    const chatId = message.chat.id;
+    
+    try {
+      await this.sendMessage(chatId, '📸 Photo received! Analyzing your aesthetic...');
+      
+      // For MVP, simulate image analysis
+      const aestheticDescription = 'minimalist, modern, urban aesthetic with warm lighting';
+      
+      await this.sendMessage(chatId, `📸 I can see this has a **${aestheticDescription}** vibe.\n\nLet me find places that match this aesthetic...`);
+      
+      // Generate plan based on aesthetic
+      const user = await this.userService.findOrCreate(telegramId);
+      if (user.credits > 0) {
+        const prompt = `Create a plan that matches this aesthetic: ${aestheticDescription}`;
+        const simulatedMessage = {
+          ...message,
+          text: prompt
+        };
+        
+        await this.handleMessage(simulatedMessage);
+      } else {
+        await this.sendOutOfCreditsMessage(chatId);
+      }
+      
+    } catch (error) {
+      console.error('❌ Photo processing error:', error);
+      await this.sendMessage(chatId, '📸 Sorry, I couldn\'t analyze your photo. Please describe what you\'re looking for instead.');
+    }
+  }
+
+  private async handleLocationMessage(message: any): Promise<void> {
+    const telegramId = message.from.id.toString();
+    const chatId = message.chat.id;
+    
+    try {
+      const { latitude, longitude } = message.location;
+      
+      await this.sendMessage(chatId, '📍 Location received! Finding nearby recommendations...');
+      
+      // Generate location-based plan
+      const user = await this.userService.findOrCreate(telegramId);
+      if (user.credits > 0) {
+        const prompt = `Find interesting places near my current location (${latitude}, ${longitude})`;
+        const simulatedMessage = {
+          ...message,
+          text: prompt
+        };
+        
+        await this.handleMessage(simulatedMessage);
+      } else {
+        await this.sendOutOfCreditsMessage(chatId);
+      }
+      
+    } catch (error) {
+      console.error('❌ Location processing error:', error);
+      await this.sendMessage(chatId, '📍 Sorry, I couldn\'t process your location. Please try typing your location instead.');
     }
   }
 
@@ -172,7 +521,116 @@ Ready to get more credits? 🚀`, {
         console.log(`💾 Saved taste profile for ${telegramId}:`, keywords);
       }
     } catch (error) {
-      console.error('Error saving taste profile:', error);
+      console.error('❌ Error saving taste profile:', error);
+    }
+  }
+
+  private isConversationalMessage(text: string): boolean {
+    const conversationalPatterns = [
+      /^(hi|hello|hey|hola|bonjour|ciao)$/i,
+      /^(how are you|what's up|wassup)$/i,
+      /^(good morning|good afternoon|good evening)$/i,
+      /^(thanks|thank you|thx)$/i,
+      /^(bye|goodbye|see you|cya)$/i,
+      /^(yes|no|ok|okay|sure)$/i,
+      /^(what|who|when|where|why|how)\?*$/i,
+    ];
+
+    return conversationalPatterns.some(pattern => pattern.test(text.trim()));
+  }
+
+  private detectActionFromText(text: string): { action: string; params: any } | null {
+    const lowerText = text.toLowerCase();
+    
+    // Venue search patterns
+    if (lowerText.includes('find') || lowerText.includes('search') || lowerText.includes('look for')) {
+      if (lowerText.includes('restaurant') || lowerText.includes('food') || lowerText.includes('eat')) {
+        return { action: 'search_venues', params: { query: 'restaurants', type: 'food' } };
+      }
+      if (lowerText.includes('bar') || lowerText.includes('drink') || lowerText.includes('cocktail')) {
+        return { action: 'search_venues', params: { query: 'bars', type: 'nightlife' } };
+      }
+      if (lowerText.includes('coffee') || lowerText.includes('cafe')) {
+        return { action: 'search_venues', params: { query: 'coffee shops', type: 'cafe' } };
+      }
+      if (lowerText.includes('music') || lowerText.includes('concert') || lowerText.includes('live')) {
+        return { action: 'search_events', params: { query: 'music events', type: 'music' } };
+      }
+    }
+
+    // Location-based patterns
+    if (lowerText.includes('near me') || lowerText.includes('nearby') || lowerText.includes('around here')) {
+      return { action: 'search_nearby', params: { query: text } };
+    }
+
+    // Taste-based patterns
+    if (lowerText.includes('like') && (lowerText.includes('jazz') || lowerText.includes('hip hop') || lowerText.includes('indie'))) {
+      return { action: 'taste_recommendations', params: { preferences: this.extractKeywords(text) } };
+    }
+
+    return null;
+  }
+
+  private async handleConversationalMessage(text: string, chatId: number, telegramId: string): Promise<void> {
+    const lowerText = text.toLowerCase().trim();
+    
+    if (['hi', 'hello', 'hey', 'hola', 'bonjour', 'ciao'].includes(lowerText)) {
+      const user = await this.userService.findOrCreate(telegramId);
+      const tasteProfile = await this.userService.getTasteProfile(telegramId);
+      
+      let greeting = `👋 Hey there! I'm TasteBot, your AI concierge for discovering amazing places based on your cultural taste.\n\n`;
+      
+      if (tasteProfile.keywords && tasteProfile.keywords.length > 0) {
+        greeting += `I see you're into **${tasteProfile.keywords.slice(0, 3).join(', ')}**. Nice taste! 🎨\n\n`;
+      }
+      
+      greeting += `💳 You have **${user.credits} credits** to explore.\n\n**What can I help you discover today?**\n\n**Try something like:**\n• "Find jazz bars in Paris"\n• "Cozy coffee shops for work"\n• "Hip hop venues with good food"\n\n**Or explore categories below:**`;
+      
+      await this.sendMessage(chatId, greeting, this.createNavigationKeyboard());
+      
+    } else if (['thanks', 'thank you', 'thx'].includes(lowerText)) {
+      await this.sendMessage(chatId, `🙏 You're welcome! I'm here whenever you need taste-based recommendations.\n\n**What would you like to explore next?**`, this.createNavigationKeyboard());
+      
+    } else if (['bye', 'goodbye', 'see you', 'cya'].includes(lowerText)) {
+      await this.sendMessage(chatId, `👋 See you later! Come back anytime you want to discover something amazing.\n\n**Quick tip:** Use /start to return to the main menu anytime!`);
+      
+    } else if (['what', 'who', 'when', 'where', 'why', 'how'].some(q => lowerText.startsWith(q))) {
+      await this.sendMessage(chatId, `🤔 Great question! I'm here to help you discover places and experiences based on your cultural taste.\n\n**Here's what I can do:**\n• Find venues matching your vibe\n• Discover events and activities\n• Recommend based on your preferences\n• Provide location-based suggestions\n\n**Try asking me something like:**\n• "Where can I find good jazz in Berlin?"\n• "What are some cozy cafes for work?"\n• "How do I find hip hop venues?"\n\n**Or use the menu below:**`, this.createNavigationKeyboard());
+      
+    } else {
+      await this.sendMessage(chatId, `😊 I understand! Let me help you find something great.\n\n**Tell me what you're looking for, like:**\n• "Jazz bars in your city"\n• "Cozy places to work"\n• "Good food and music"\n\n**Or browse categories:**`, this.createNavigationKeyboard());
+    }
+  }
+
+  private isNumericSelection(text: string): boolean {
+    const num = parseInt(text.trim());
+    return !isNaN(num) && num >= 1 && num <= 20; // Support up to 20 selections
+  }
+
+  private async handleInteractiveSelection(text: string, chatId: number, telegramId: string, context: any): Promise<void> {
+    const selectedIndex = parseInt(text.trim()) - 1; // Convert to 0-based index
+    
+    try {
+      if (context.type === 'venue_list' && context.venues && context.venues[selectedIndex]) {
+        const selectedVenue = context.venues[selectedIndex];
+        const formatted = this.responseFormatter.formatVenueDetails(selectedVenue);
+        
+        // Store venue details for further interactions
+        this.userSelectionContext.set(telegramId, {
+          type: 'venue_details',
+          venue: selectedVenue,
+          originalList: context.venues
+        });
+        
+        await this.sendMessage(chatId, formatted.text, formatted.keyboard);
+      } else {
+        await this.sendMessage(chatId, '❌ Invalid selection. Please choose a valid number from the list.', this.createNavigationKeyboard());
+        // Clear invalid context
+        this.userSelectionContext.delete(telegramId);
+      }
+    } catch (error) {
+      console.error('❌ Error handling interactive selection:', error);
+      await this.sendMessage(chatId, '❌ Error processing your selection. Please try again.', this.createNavigationKeyboard());
     }
   }
 
@@ -193,194 +651,213 @@ Ready to get more credits? 🚀`, {
       }
     });
 
-    return [...new Set(keywords)]; // Remove duplicates
+    return [...new Set(keywords)];
   }
 
-  private async checkIfNeedsMoreProfileInfo(telegramId: string, message: string, tasteProfile: any): Promise<string | null> {
-    const keywords = tasteProfile.keywords || [];
-    const messageKeywords = this.extractKeywords(message);
-    
-    // If user has very few preferences, ask for more
-    if (keywords.length < 3) {
-      const missingCategories = [];
-      
-      const hasMusic = keywords.some(k => ['hip hop', 'jazz', 'techno', 'indie', 'rock', 'pop', 'classical', 'blues', 'reggae'].includes(k));
-      const hasFood = keywords.some(k => ['sushi', 'ramen', 'steak', 'pizza', 'tacos', 'burgers', 'pasta', 'seafood', 'vegan'].includes(k));
-      const hasVibe = keywords.some(k => ['cyberpunk', 'vintage', 'modern', 'minimalist', 'bohemian', 'urban', 'cozy'].includes(k));
-      
-      if (!hasMusic) missingCategories.push('music genre');
-      if (!hasFood) missingCategories.push('food preference');
-      if (!hasVibe) missingCategories.push('aesthetic vibe');
-      
-      if (missingCategories.length > 0 && messageKeywords.length === 0) {
-        return `🤖 I'd love to give you better recommendations! 
-
-Your current taste profile: ${keywords.length > 0 ? keywords.join(', ') : 'Empty'}
-
-To improve your plans, tell me about your:
-${missingCategories.map(cat => `• ${cat.charAt(0).toUpperCase() + cat.slice(1)}`).join('\n')}
-
-Example: "I love jazz music, sushi, and cozy minimalist vibes"
-
-Then ask me again for recommendations! 🎯`;
-      }
-    }
-    
-    return null;
+  private formatResponseWithNavigation(response: string): string {
+    return `${response}\n\n💡 **What's next?**\n• Ask for more details\n• Try a different location\n• Explore other categories\n• Type /help for all options`;
   }
 
-  private async isMoodUpdate(text: string): Promise<boolean> {
-    const moodKeywords = [
-      'chill', 'relaxed', 'calm', 'peaceful',
-      'energetic', 'hyper', 'active', 'pumped',
-      'romantic', 'intimate', 'cozy', 'loving',
-      'adventurous', 'exciting', 'wild', 'crazy',
-      'creative', 'artistic', 'inspired',
-      'social', 'party', 'fun', 'outgoing',
-      'introspective', 'thoughtful', 'quiet'
-    ];
-
-    return moodKeywords.some(mood => text.toLowerCase().includes(mood));
+  private createNavigationKeyboard(_currentNode?: any): any {
+    return {
+      inline_keyboard: [
+        [
+          { text: '🧪 Test Button', callback_data: 'test_button' },
+          { text: '🎯 Get New Plan', callback_data: 'get_plan' },
+        ],
+        [
+          { text: '📍 Explore Location', callback_data: 'nav_explore_location' },
+          { text: '🧠 Discover by Taste', callback_data: 'nav_discover_taste' },
+        ],
+        [
+          { text: '�  Music & Audio', callback_data: 'nav_music_audio' },
+          { text: '🍽️ Food & Dining', callback_data: 'nav_food_dining' },
+        ],
+        [
+          { text: '❓ Help', callback_data: 'help' },
+          { text: '💳 Buy Credits', callback_data: 'buy_credits' },
+        ],
+      ],
+    };
   }
 
-  private async handleVoiceMessage(message: any): Promise<void> {
-    const telegramId = message.from.id.toString();
-    
-    try {
-      // Get voice file info
-      const fileId = message.voice.file_id;
-      const fileInfo = await this.getFileInfo(fileId);
-      
-      if (fileInfo && fileInfo.file_path) {
-        // Download voice file
-        const audioBuffer = await this.downloadFile(fileInfo.file_path);
-        
-        // Transcribe using LLM service (placeholder)
-        await this.sendMessage(message.chat.id, '🎙️ Voice message received! Processing...');
-        
-        // For MVP, we'll simulate transcription
-        const transcribedText = 'I want a chill plan for tonight with good music and food';
-        
-        await this.sessionService.addToConversationHistory(telegramId, `[Voice]: ${transcribedText}`);
-        
-        // Process as regular text message
-        const user = await this.userService.findOrCreate(telegramId);
-        if (user.credits > 0) {
-          const plan = await this.planService.generatePlanForUser(telegramId, transcribedText);
-          if (plan) {
-            await this.sessionService.savePlanToContext(telegramId, plan);
-            const formattedPlan = this.planService.formatPlanForTelegram(plan);
-            await this.sendMessage(message.chat.id, formattedPlan, this.createQuickStartKeyboard());
-          }
-        } else {
-          await this.sendMessage(message.chat.id, 'You\'re out of credits. Use /buy to get more!');
-        }
-      }
-    } catch (error) {
-      console.error('Voice processing error:', error);
-      await this.sendMessage(message.chat.id, 'Sorry, I couldn\'t process your voice message. Please try typing instead.');
-    }
+  private async sendWelcomeMessage(chatId: number): Promise<void> {
+    const welcomeText = `🎨 **Welcome to TasteBot!**
+Your AI concierge for taste-based planning
+
+🎁 You have **5 free credits** to explore. Tell me what you love and I'll create personalized plans!
+
+**Try something like:**
+• "I love hip hop and steak in NYC"
+• "Find me cozy jazz cafes in Paris"  
+• "Cyberpunk vibes for tonight"
+
+**Or use the menu below:**
+
+🧪 **Debug Info:**
+• Bot token configured: ${this.botToken ? '✅' : '❌'}
+• Navigation router: ${this.navigationRouter ? '✅' : '❌'}
+• Test the 🧪 button to verify callbacks work`;
+
+    await this.sendMessage(chatId, welcomeText, this.createNavigationKeyboard());
   }
 
-  private async handlePhotoMessage(message: any): Promise<void> {
-    const telegramId = message.from.id.toString();
-    
-    try {
-      // Get largest photo
-      const photo = message.photo[message.photo.length - 1];
-      const fileInfo = await this.getFileInfo(photo.file_id);
-      
-      if (fileInfo && fileInfo.file_path) {
-        await this.sendMessage(message.chat.id, '📸 Photo received! Analyzing your aesthetic...');
-        
-        // Download image
-        const imageBuffer = await this.downloadFile(fileInfo.file_path);
-        
-        // For MVP, simulate image analysis
-        const aestheticDescription = 'minimalist, modern, urban aesthetic with warm lighting';
-        
-        await this.sessionService.addToConversationHistory(telegramId, `[Photo]: ${aestheticDescription}`);
-        
-        // Generate plan based on aesthetic
-        const user = await this.userService.findOrCreate(telegramId);
-        if (user.credits > 0) {
-          const prompt = `Create a plan that matches this aesthetic: ${aestheticDescription}`;
-          const plan = await this.planService.generatePlanForUser(telegramId, prompt);
-          
-          if (plan) {
-            await this.sessionService.savePlanToContext(telegramId, plan);
-            const formattedPlan = this.planService.formatPlanForTelegram(plan);
-            await this.sendMessage(message.chat.id, `Based on your photo's ${aestheticDescription} vibe:\n\n${formattedPlan}`, this.createQuickStartKeyboard());
-          }
-        } else {
-          await this.sendMessage(message.chat.id, 'You\'re out of credits. Use /buy to get more!');
-        }
-      }
-    } catch (error) {
-      console.error('Photo processing error:', error);
-      await this.sendMessage(message.chat.id, 'Sorry, I couldn\'t analyze your photo. Please try describing what you\'re looking for instead.');
-    }
+  private async sendHelpMessage(chatId: number): Promise<void> {
+    const helpText = `🤖 **TasteBot Help**
+
+**Commands:**
+/start - Welcome message and main menu
+/help - Show this help message
+/explore - Browse categories
+/nearby - Find places near you
+/credits - Check your credit balance
+/profile - View your profile
+/taste - Manage taste preferences
+/buy - Purchase more credits
+/demo - See example requests
+
+**How to Use:**
+Just tell me what you love! I understand:
+• Music genres + food + locations
+• Aesthetic vibes and moods
+• Cultural preferences
+• Activity types
+
+**Examples:**
+• "Jazz bars with good wine in Berlin"
+• "Cozy minimalist cafes for work"
+• "Cyberpunk night out vibes"
+• "Indie bookstores and coffee"
+
+**Features:**
+🎵 Multi-modal input (text, voice, photos)
+📍 Location-based recommendations  
+🎨 Cultural taste understanding
+💳 Credit-based system
+
+**Need help?** Just ask me anything!`;
+
+    await this.sendMessage(chatId, helpText, this.createNavigationKeyboard());
   }
 
-  private async handleLocationMessage(message: any): Promise<void> {
-    const telegramId = message.from.id.toString();
-    
-    try {
-      const { latitude, longitude } = message.location;
-      
-      await this.sendMessage(message.chat.id, '📍 Location received! Finding nearby recommendations...');
-      
-      // Update session with location
-      await this.sessionService.updateLocation(telegramId, `${latitude},${longitude}`);
-      
-      // Generate location-based plan
-      const user = await this.userService.findOrCreate(telegramId);
-      if (user.credits > 0) {
-        const prompt = `Find interesting places near my current location (${latitude}, ${longitude})`;
-        const plan = await this.planService.generatePlanForUser(telegramId, prompt);
-        
-        if (plan) {
-          await this.sessionService.savePlanToContext(telegramId, plan);
-          const formattedPlan = this.planService.formatPlanForTelegram(plan);
-          await this.sendMessage(message.chat.id, formattedPlan, this.createQuickStartKeyboard());
-        }
-      } else {
-        await this.sendMessage(message.chat.id, 'You\'re out of credits. Use /buy to get more!');
-      }
-    } catch (error) {
-      console.error('Location processing error:', error);
-      await this.sendMessage(message.chat.id, 'Sorry, I couldn\'t process your location. Please try typing your location instead.');
-    }
+  private async sendExploreMenu(chatId: number): Promise<void> {
+    const exploreText = `🗺️ **Explore Categories**
+
+Choose what interests you most:`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '📍 Explore by Location', callback_data: 'nav_explore_location' },
+          { text: '🧠 Discover by Taste', callback_data: 'nav_discover_taste' },
+        ],
+        [
+          { text: '🧳 Nomad & Remote Life', callback_data: 'nav_nomad_remote' },
+          { text: '🛍️ Lifestyle & Shopping', callback_data: 'nav_lifestyle_shopping' },
+        ],
+        [
+          { text: '🎭 For Creatives', callback_data: 'nav_creatives' },
+          { text: '🎵 Music & Audio', callback_data: 'nav_music_audio' },
+        ],
+        [
+          { text: '🍽️ Food & Dining', callback_data: 'nav_food_dining' },
+          { text: '❓ Help', callback_data: 'help' },
+        ],
+      ],
+    };
+
+    await this.sendMessage(chatId, exploreText, keyboard);
   }
 
-  private async getFileInfo(fileId: string): Promise<any> {
-    const url = `https://api.telegram.org/bot${this.botToken}/getFile?file_id=${fileId}`;
-    
-    try {
-      const response = await fetch(url);
-      const data = await response.json();
-      return data.ok ? data.result : null;
-    } catch (error) {
-      console.error('Get file info error:', error);
-      return null;
-    }
+  private async sendNearbyOptions(chatId: number): Promise<void> {
+    const nearbyText = `📍 **Find Nearby Places**
+
+Share your location or tell me your city, and I'll find great spots nearby!
+
+**You can also try:**
+• "Nearby restaurants"
+• "Coffee shops near me"
+• "Bars in [your city]"
+• "Live music venues nearby"`;
+
+    await this.sendMessage(chatId, nearbyText, this.createNavigationKeyboard());
   }
 
-  private async downloadFile(filePath: string): Promise<Buffer> {
-    const url = `https://api.telegram.org/file/bot${this.botToken}/${filePath}`;
-    
-    try {
-      const response = await fetch(url);
-      const arrayBuffer = await response.arrayBuffer();
-      return Buffer.from(arrayBuffer);
-    } catch (error) {
-      console.error('Download file error:', error);
-      throw error;
-    }
+  private async sendBuyCreditsMessage(chatId: number): Promise<void> {
+    const buyText = `💳 **Buy More Credits**
+
+**Current pricing:**
+• 50 credits - $5.00
+• 100 credits - $9.00 _(Save $1!)_
+• 200 credits - $17.00 _(Save $3!)_
+
+Each credit = 1 personalized plan 🎯
+
+**Click below to purchase:**`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '💳 Buy 50 Credits ($5)', url: 'https://buy.stripe.com/test_50credits' },
+        ],
+        [
+          { text: '💎 Buy 100 Credits ($9)', url: 'https://buy.stripe.com/test_100credits' },
+        ],
+        [
+          { text: '🚀 Buy 200 Credits ($17)', url: 'https://buy.stripe.com/test_200credits' },
+        ],
+        [
+          { text: '🏠 Back to Menu', callback_data: 'nav_root' },
+        ],
+      ],
+    };
+
+    await this.sendMessage(chatId, buyText, keyboard);
+  }
+
+  private async sendProfileInfo(telegramId: string, chatId: number): Promise<void> {
+    const user = await this.userService.findByTelegramId(telegramId);
+    const tasteProfile = await this.userService.getTasteProfile(telegramId);
+
+    const profileText = `👤 **Your Profile**
+
+💳 **Credits:** ${user?.credits || 0}
+🎯 **Plans Generated:** Available in full version
+📅 **Member Since:** ${user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Today'}
+
+🎨 **Taste Keywords:** ${tasteProfile.keywords?.length > 0 ? tasteProfile.keywords.join(', ') : 'None yet - tell me what you love!'}
+
+**Commands:**
+/credits - Check credit balance
+/taste - Manage taste profile  
+/buy - Purchase more credits`;
+
+    await this.sendMessage(chatId, profileText, this.createNavigationKeyboard());
+  }
+
+  private async sendTasteProfileInfo(telegramId: string, chatId: number): Promise<void> {
+    const tasteProfile = await this.userService.getTasteProfile(telegramId);
+
+    const tasteText = `🎨 **Your Taste Profile**
+
+**Current Keywords:** ${tasteProfile.keywords?.length > 0 ? tasteProfile.keywords.join(', ') : 'None yet'}
+
+**To add to your taste profile, just tell me what you love:**
+• "I love jazz and sushi"
+• "I'm into cyberpunk aesthetics"
+• "I enjoy cozy coffee shops"
+
+I'll automatically learn your preferences! 🤖
+
+**Want to start fresh?** Type: "Reset my taste profile"`;
+
+    await this.sendMessage(chatId, tasteText, this.createNavigationKeyboard());
   }
 
   private async sendDemoFlow(chatId: number): Promise<void> {
-    const demoText = `🎬 DEMO MODE: Here are some examples to try:
+    const demoText = `🎬 **DEMO MODE**
+
+Here are some examples to try:
 
 🎯 **Text Examples:**
 • "I love Blade Runner and jazz in Tokyo"
@@ -397,144 +874,30 @@ Each shows different AI capabilities! 🤖
 
 Try any of these to see TasteBot's cultural intelligence in action.`;
 
-    await this.sendMessage(chatId, demoText);
+    await this.sendMessage(chatId, demoText, this.createNavigationKeyboard());
   }
 
-  private async handleCallbackQuery(callbackQuery: any): Promise<void> {
-    const telegramId = callbackQuery.from.id.toString();
-    const chatId = callbackQuery.message.chat.id;
-    const data = callbackQuery.data;
+  private async sendOutOfCreditsMessage(chatId: number): Promise<void> {
+    const outOfCreditsText = `💳 **You're out of credits!**
 
-    // Answer the callback query to remove loading state
-    await this.answerCallbackQuery(callbackQuery.id);
+You need credits to generate personalized plans. Each plan costs 1 credit.
 
-    // Check credits for plan generation buttons
-    const user = await this.userService.findByTelegramId(telegramId);
-    const needsCredits = ['another_plan', 'nearby_options', 'music_food_plan', 'music_food', 'night_out', 'chill_day', 'cultural'].includes(data);
-    
-    if (needsCredits && (!user || user.credits < 1)) {
-      await this.sendMessage(chatId, '💳 You need credits to generate plans! Use /buy to get more credits.');
-      return;
-    }
+**Free commands you can still use:**
+• /profile - View your profile
+• /taste - Manage taste preferences  
+• /demo - See examples
+• /credits - Check balance
 
-    switch (data) {
-      case 'another_plan':
-        await this.sendMessage(chatId, '🔮 Generating another plan based on your preferences...');
-        await this.generatePlanFromProfile(telegramId, chatId);
-        break;
-        
-      case 'nearby_options':
-        await this.sendMessage(chatId, '📍 Finding nearby options based on your taste...');
-        await this.generateNearbyPlan(telegramId, chatId);
-        break;
-        
-      case 'music_food_plan':
-      case 'music_food':
-        await this.sendMessage(chatId, '🎵🍽️ Creating a music + food experience...');
-        await this.generateMusicFoodPlan(telegramId, chatId);
-        break;
-        
-      case 'night_out':
-        await this.sendMessage(chatId, '🌃 Planning your perfect night out...');
-        await this.generateNightOutPlan(telegramId, chatId);
-        break;
-        
-      case 'chill_day':
-        await this.sendMessage(chatId, '☕ Creating a chill day plan...');
-        await this.generateChillPlan(telegramId, chatId);
-        break;
-        
-      case 'cultural':
-        await this.sendMessage(chatId, '🎨 Finding cultural experiences...');
-        await this.generateCulturalPlan(telegramId, chatId);
-        break;
-        
-      case 'location':
-        await this.sendMessage(chatId, '📍 Please share your location and I\'ll find great spots nearby!');
-        break;
-        
-      case 'buy_credits':
-        await this.sendBuyCreditsMessage(chatId);
-        break;
-        
-      default:
-        await this.sendMessage(chatId, 'Sorry, I didn\'t understand that option. Try typing what you\'re looking for!');
-    }
-  }
+**Ready to get more credits?** 🚀`;
 
-  private async generatePlanFromProfile(telegramId: string, chatId: number): Promise<void> {
-    const tasteProfile = await this.userService.getTasteProfile(telegramId);
-    const preferences = tasteProfile.keywords?.join(' and ') || 'trendy spots';
-    
-    const plan = await this.planService.generatePlanForUser(telegramId, `I want recommendations based on my taste for ${preferences}`);
-    
-    if (plan) {
-      await this.sessionService.savePlanToContext(telegramId, plan);
-      const formattedPlan = this.planService.formatPlanForTelegram(plan);
-      await this.sendMessage(chatId, formattedPlan, this.createQuickStartKeyboard());
-    } else {
-      await this.sendMessage(chatId, 'Sorry, I couldn\'t generate a plan right now. Please try again!');
-    }
-  }
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '💳 Buy Credits', callback_data: 'buy_credits' }],
+        [{ text: '🎬 See Demo', callback_data: 'demo' }],
+      ]
+    };
 
-  private async generateNearbyPlan(telegramId: string, chatId: number): Promise<void> {
-    const plan = await this.planService.generatePlanForUser(telegramId, 'Find me great nearby spots that match my taste');
-    
-    if (plan) {
-      await this.sessionService.savePlanToContext(telegramId, plan);
-      const formattedPlan = this.planService.formatPlanForTelegram(plan);
-      await this.sendMessage(chatId, formattedPlan, this.createQuickStartKeyboard());
-    } else {
-      await this.sendMessage(chatId, 'Sorry, I couldn\'t find nearby options right now. Try sharing your location or being more specific!');
-    }
-  }
-
-  private async generateMusicFoodPlan(telegramId: string, chatId: number): Promise<void> {
-    const plan = await this.planService.generatePlanForUser(telegramId, 'Create a plan combining great music venues and delicious food');
-    
-    if (plan) {
-      await this.sessionService.savePlanToContext(telegramId, plan);
-      const formattedPlan = this.planService.formatPlanForTelegram(plan);
-      await this.sendMessage(chatId, formattedPlan, this.createQuickStartKeyboard());
-    } else {
-      await this.sendMessage(chatId, 'Tell me your favorite music genre and food type for better recommendations!');
-    }
-  }
-
-  private async generateNightOutPlan(telegramId: string, chatId: number): Promise<void> {
-    const plan = await this.planService.generatePlanForUser(telegramId, 'Plan an exciting night out with bars, clubs, and entertainment');
-    
-    if (plan) {
-      await this.sessionService.savePlanToContext(telegramId, plan);
-      const formattedPlan = this.planService.formatPlanForTelegram(plan);
-      await this.sendMessage(chatId, formattedPlan, this.createQuickStartKeyboard());
-    } else {
-      await this.sendMessage(chatId, 'What kind of night out vibe are you feeling? Tell me more about your preferences!');
-    }
-  }
-
-  private async generateChillPlan(telegramId: string, chatId: number): Promise<void> {
-    const plan = await this.planService.generatePlanForUser(telegramId, 'Create a relaxing chill day with cozy cafes, peaceful spots, and good vibes');
-    
-    if (plan) {
-      await this.sessionService.savePlanToContext(telegramId, plan);
-      const formattedPlan = this.planService.formatPlanForTelegram(plan);
-      await this.sendMessage(chatId, formattedPlan, this.createQuickStartKeyboard());
-    } else {
-      await this.sendMessage(chatId, 'What makes you feel chill? Coffee shops, parks, bookstores? Tell me more!');
-    }
-  }
-
-  private async generateCulturalPlan(telegramId: string, chatId: number): Promise<void> {
-    const plan = await this.planService.generatePlanForUser(telegramId, 'Find cultural experiences like art galleries, museums, theaters, and cultural venues');
-    
-    if (plan) {
-      await this.sessionService.savePlanToContext(telegramId, plan);
-      const formattedPlan = this.planService.formatPlanForTelegram(plan);
-      await this.sendMessage(chatId, formattedPlan, this.createQuickStartKeyboard());
-    } else {
-      await this.sendMessage(chatId, 'What cultural experiences interest you? Art, music, theater, history? Let me know!');
-    }
+    await this.sendMessage(chatId, outOfCreditsText, keyboard);
   }
 
   private async answerCallbackQuery(callbackQueryId: string): Promise<void> {
@@ -547,184 +910,8 @@ Try any of these to see TasteBot's cultural intelligence in action.`;
         body: JSON.stringify({ callback_query_id: callbackQueryId }),
       });
     } catch (error) {
-      console.error('Failed to answer callback query:', error);
+      console.error('❌ Failed to answer callback query:', error);
     }
-  }
-
-  private async sendBuyCreditsMessage(chatId: number): Promise<void> {
-    const buyText = `💳 *Buy More Credits*
-
-*Current pricing:*
-• 50 credits \\- $5\\.00
-• 100 credits \\- $9\\.00 \\(_Save $1\\!_\\)
-• 200 credits \\- $17\\.00 \\(_Save $3\\!_\\)
-
-Each credit = 1 personalized plan 🎯
-
-*Click below to purchase:*`;
-
-    const keyboard = {
-      inline_keyboard: [
-        [
-          { text: '💳 Buy 50 Credits ($5)', url: 'https://buy.stripe.com/test_50credits' },
-        ],
-        [
-          { text: '💎 Buy 100 Credits ($9)', url: 'https://buy.stripe.com/test_100credits' },
-        ],
-        [
-          { text: '🚀 Buy 200 Credits ($17)', url: 'https://buy.stripe.com/test_200credits' },
-        ],
-      ],
-    };
-
-    await this.sendMessage(chatId, buyText, keyboard);
-  }
-
-  private async sendProfileInfo(telegramId: string, chatId: number): Promise<void> {
-    const user = await this.userService.findByTelegramId(telegramId);
-    const tasteProfile = await this.userService.getTasteProfile(telegramId);
-
-    const profileText = `👤 *Your Profile*
-
-💳 *Credits:* ${user?.credits || 0}
-🎯 *Plans Generated:* Available in full version
-📅 *Member Since:* ${user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Today'}
-
-🎨 *Taste Keywords:* ${tasteProfile.keywords?.length > 0 ? this.escapeMarkdownV2(tasteProfile.keywords.join(', ')) : 'None yet \\- tell me what you love\\!'}
-
-*Commands:*
-/credits \\- Check credit balance
-/taste \\- Manage taste profile  
-/buy \\- Purchase more credits`;
-
-    await this.sendMessage(chatId, profileText);
-  }
-
-  private async sendTasteProfileInfo(telegramId: string, chatId: number): Promise<void> {
-    const tasteProfile = await this.userService.getTasteProfile(telegramId);
-
-    const tasteText = `🎨 Your Taste Profile
-
-Current Keywords: ${tasteProfile.keywords?.length > 0 ? tasteProfile.keywords.join(', ') : 'None yet'}
-
-To add to your taste profile, just tell me what you love:
-• "I love jazz and sushi"
-• "I'm into cyberpunk aesthetics"
-• "I enjoy cozy coffee shops"
-
-I'll automatically learn your preferences! 🤖
-
-Want to start fresh? Type: "Reset my taste profile"`;
-
-    await this.sendMessage(chatId, tasteText);
-  }
-
-  private async sendHelpMessage(chatId: number): Promise<void> {
-    const helpText = `🤖 *TasteBot Commands*
-
-*Basic Commands:*
-/start \\- Welcome message and quick options
-/help \\- Show this help message
-/credits \\- Check your credit balance
-/profile \\- View your complete profile
-/taste \\- Manage your taste preferences
-/buy \\- Purchase more credits
-/demo \\- See example requests
-
-*How to Use:*
-Just tell me what you love\\! Examples:
-• "I love hip hop and steak in NYC"
-• "Find cozy jazz cafes in Paris"
-• "Cyberpunk night out vibes"
-• "Chill day with good coffee"
-
-*Features:*
-🎵 Multi\\-modal input \\(text, voice, photos\\)
-📍 Location\\-based recommendations  
-🎨 Cultural taste understanding
-💳 Credit\\-based system \\(5 free credits\\)
-
-*Need more help?* Just ask me anything\\!`;
-
-    await this.sendMessage(chatId, helpText);
-  }
-
-  private getContextualHelp(keywords: string[], originalMessage: string): string {
-    if (keywords.length === 0) {
-      return `I'd love to help you find something great! 
-
-Try being more specific:
-• "I love [music genre] and [food type] in [city]"
-• "Find me [vibe] places for [activity]"
-• "I want [mood] vibes tonight"
-
-Examples:
-• "Hip hop clubs with good food in NYC"
-• "Cozy jazz cafes in Paris"
-• "Cyberpunk aesthetic bars"
-
-Type /help for all commands!`;
-    }
-
-    let helpText = `I see you're interested in ${keywords.join(', ')}! 
-
-To get better recommendations, try:
-`;
-
-    if (!originalMessage.toLowerCase().includes('in ') && !originalMessage.toLowerCase().includes('near')) {
-      helpText += `• Add a location: "${originalMessage} in [your city]"\n`;
-    }
-
-    if (keywords.some(k => ['hip hop', 'jazz', 'techno', 'indie'].includes(k))) {
-      helpText += `• Combine with food: "${originalMessage} with great food"\n`;
-      helpText += `• Add venue type: "${originalMessage} clubs" or "bars"\n`;
-    }
-
-    if (keywords.some(k => ['steak', 'sushi', 'pizza'].includes(k))) {
-      helpText += `• Add atmosphere: "${originalMessage} with live music"\n`;
-      helpText += `• Specify vibe: "upscale ${originalMessage}" or "casual ${originalMessage}"\n`;
-    }
-
-    helpText += `
-Or try these commands:
-/help - All commands
-/demo - See examples
-/profile - Your info`;
-
-    return helpText;
-  }
-
-  private async sendWelcomeMessage(chatId: number): Promise<void> {
-    const welcomeText = `👋 Welcome to TasteBot!
-Your AI concierge for taste-based planning
-
-🎁 You have 5 free credits to explore. Tell me what you love and I'll create personalized plans!
-
-Try something like:
-• "I love hip hop and steak in NYC"
-• "Find me cozy jazz cafes in Paris"  
-• "Cyberpunk vibes for tonight"
-
-Or use these quick options:`;
-
-    const keyboard = {
-      inline_keyboard: [
-        [
-          { text: '🎵 Music + Food Plan', callback_data: 'music_food' },
-          { text: '🌃 Night Out Vibe', callback_data: 'night_out' },
-        ],
-        [
-          { text: '☕ Chill Day Plan', callback_data: 'chill_day' },
-          { text: '🎨 Cultural Experience', callback_data: 'cultural' },
-        ],
-        [
-          { text: '📍 Use My Location', callback_data: 'location' },
-          { text: '💳 Buy More Credits', callback_data: 'buy_credits' },
-        ],
-      ],
-    };
-
-    await this.sendMessage(chatId, welcomeText, keyboard);
   }
 
   private async sendMessage(chatId: number, text: string, replyMarkup?: any): Promise<void> {
@@ -733,17 +920,15 @@ Or use these quick options:`;
     // Ensure text is not too long (Telegram limit is 4096 characters)
     const truncatedText = text.length > 4000 ? text.substring(0, 4000) + '...' : text;
     
-    // Clean text and send without complex formatting
-    const cleanText = this.cleanTextForTelegram(truncatedText);
-    
     const payload = {
       chat_id: chatId,
-      text: cleanText,
+      text: truncatedText,
+      parse_mode: 'Markdown',
       ...(replyMarkup && { reply_markup: replyMarkup }),
     };
 
     try {
-      console.log(`📤 Sending message to ${chatId}:`, cleanText.substring(0, 100) + '...');
+      console.log(`📤 Sending message to ${chatId}:`, truncatedText.substring(0, 100) + '...');
       
       const response = await fetch(url, {
         method: 'POST',
@@ -756,70 +941,25 @@ Or use these quick options:`;
       if (!response.ok) {
         const errorData = await response.json();
         console.error('❌ Telegram API error:', errorData);
+        
+        // Fallback without markdown if parsing fails
+        if (errorData.description?.includes('parse')) {
+          const fallbackPayload = {
+            ...payload,
+            parse_mode: undefined,
+          };
+          
+          await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fallbackPayload),
+          });
+        }
       } else {
         console.log('✅ Message sent successfully');
       }
     } catch (error) {
       console.error('❌ Failed to send message:', error);
     }
-  }
-
-  private cleanTextForTelegram(text: string): string {
-    return text
-      .replace(/[^\x20-\x7E\u00A0-\u00FF\u2600-\u26FF\u2700-\u27BF\uFE0F]/g, '') // Keep ASCII + basic emojis
-      .replace(/\s+/g, ' ') // Normalize whitespace
-      .replace(/\\/g, '') // Remove escape characters
-      .trim();
-  }
-
-  private convertToMarkdown(text: string): string {
-    return text
-      .replace(/\*\*(.*?)\*\*/g, '*$1*') // Convert **bold** to *bold*
-      .replace(/__(.*?)__/g, '_$1_'); // Convert __italic__ to _italic_
-  }
-
-  private stripFormatting(text: string): string {
-    return text
-      .replace(/\*\*(.*?)\*\*/g, '$1') // Remove **bold**
-      .replace(/__(.*?)__/g, '$1') // Remove __italic__
-      .replace(/\*(.*?)\*/g, '$1') // Remove *italic*
-      .replace(/_(.*?)_/g, '$1') // Remove _italic_
-      .replace(/\\/g, ''); // Remove escape characters
-  }
-
-  private escapeMarkdownV2(text: string): string {
-    // Escape ALL MarkdownV2 special characters
-    return text.replace(/([_*\[\]()~`>#+=|{}.!-\\])/g, '\\$1');
-  }
-
-  private formatPlanResponse(plan: any): string {
-    if (!plan || !plan.activities) return 'No plan generated.';
-
-    let response = `🎯 Here's your personalized plan:\n\n`;
-    
-    plan.activities.forEach((activity: any, index: number) => {
-      response += `${index + 1}. ${activity.emoji || '📍'} ${activity.name}\n`;
-      if (activity.description) {
-        response += `   ${activity.description}\n`;
-      }
-      response += '\n';
-    });
-
-    return response;
-  }
-
-  private createQuickStartKeyboard() {
-    return {
-      inline_keyboard: [
-        [
-          { text: '🔮 Another plan', callback_data: 'another_plan' },
-          { text: '📍 Nearby options', callback_data: 'nearby_options' },
-        ],
-        [
-          { text: '🎵 Music + Food', callback_data: 'music_food_plan' },
-          { text: '💳 Buy credits', callback_data: 'buy_credits' },
-        ],
-      ],
-    };
   }
 }

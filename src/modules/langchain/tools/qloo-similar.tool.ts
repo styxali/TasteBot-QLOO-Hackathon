@@ -21,7 +21,7 @@ export class QlooSimilarTool extends BaseTool {
     super();
   }
 
-  async execute(params: { entityId: string; type?: string; limit?: number }, context: UserContext): Promise<ToolResult> {
+  async execute(params: { entityId: string; type?: string; limit?: number }, _context: UserContext): Promise<ToolResult> {
     try {
       if (!this.validateParams(params, ['entityId'])) {
         return this.createErrorResult('Missing required parameter: entityId');
@@ -29,10 +29,14 @@ export class QlooSimilarTool extends BaseTool {
 
       console.log(`🔗 Finding similar entities for: ${params.entityId}`);
       
-      const similarEntities = await this.qlooService.findSimilarEntities(
-        params.entityId,
-        params.type
-      );
+      // Use the insights API to find similar entities
+      const response = await this.qlooService.getInsights({
+        filterType: params.type ? `urn:entity:${params.type}` : 'urn:entity:place',
+        signalInterestsEntities: [params.entityId],
+        take: params.limit || 5
+      });
+      
+      const similarEntities = response.results.entities || [];
       
       const result = this.createSuccessResult(similarEntities, {
         toolName: 'qloo_similar',

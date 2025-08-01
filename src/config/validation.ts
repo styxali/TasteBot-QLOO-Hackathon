@@ -27,10 +27,12 @@ export const validationSchema = Joi.object({
   SERP_API_KEY: Joi.string().optional(),
   SERPER_API_KEY: Joi.string().optional(),
   APIFY_API_KEY: Joi.string().optional(),
+  
+  // Location Services
+  FOURSQUARE_API_KEY: Joi.string().optional(),
 
   // Location Services (optional)
   GEOAPIFY_API_KEY: Joi.string().optional(),
-  FOURSQUARE_API_KEY: Joi.string().optional(),
 
   // Web Scraping (optional)
   FIRECRAWL_API_KEY: Joi.string().optional(),

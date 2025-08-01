@@ -12,6 +12,8 @@ export class QlooInsightsTool extends BaseTool {
     properties: {
       query: { type: 'string', description: 'Search query for cultural entities' },
       type: { type: 'string', description: 'Entity type filter (music, movies, food, etc.)' },
+      location: { type: 'string', description: 'Location context for search' },
+      take: { type: 'number', description: 'Maximum number of results' },
     },
     required: ['query'],
   };
@@ -20,7 +22,7 @@ export class QlooInsightsTool extends BaseTool {
     super();
   }
 
-  async execute(params: { query: string; type?: string }, context: UserContext): Promise<ToolResult> {
+  async execute(params: { query: string; type?: string; location?: string; take?: number }, _context: UserContext): Promise<ToolResult> {
     try {
       if (!this.validateParams(params, ['query'])) {
         return this.createErrorResult('Missing required parameter: query');
@@ -28,12 +30,18 @@ export class QlooInsightsTool extends BaseTool {
 
       console.log(`🔍 Searching Qloo for: ${params.query}`);
       
-      const entities = await this.qlooService.searchEntities(params.query, params.type);
+      const entities = await this.qlooService.searchEntities({
+        query: params.query,
+        types: params.type ? [params.type] : undefined,
+        location: params.location,
+        take: params.take || 10
+      });
       
       const result = this.createSuccessResult(entities, {
         toolName: 'qloo_insights',
         query: params.query,
         type: params.type,
+        location: params.location,
         resultCount: entities.length,
       });
 
