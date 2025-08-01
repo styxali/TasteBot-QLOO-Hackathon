@@ -8,8 +8,12 @@ export class QlooInsightsTool extends BaseTool {
   name = 'qloo_insights';
   description = 'Search Qloo cultural intelligence database for entities and insights';
   parameters = {
-    query: { type: 'string', required: true, description: 'Search query for cultural entities' },
-    type: { type: 'string', required: false, description: 'Entity type filter (music, movies, food, etc.)' },
+    type: 'object' as const,
+    properties: {
+      query: { type: 'string', description: 'Search query for cultural entities' },
+      type: { type: 'string', description: 'Entity type filter (music, movies, food, etc.)' },
+    },
+    required: ['query'],
   };
 
   constructor(private readonly qlooService: QlooService) {

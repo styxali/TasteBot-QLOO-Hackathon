@@ -8,8 +8,12 @@ export class SerperEventsTool extends BaseTool {
   name = 'serper_events';
   description = 'Search for local events and happenings using Google search';
   parameters = {
-    location: { type: 'string', required: true, description: 'Location to search for events' },
-    eventType: { type: 'string', required: false, description: 'Type of events to search for' },
+    type: 'object' as const,
+    properties: {
+      location: { type: 'string', description: 'Location to search for events' },
+      eventType: { type: 'string', description: 'Type of events to search for' },
+    },
+    required: ['location'],
   };
 
   constructor(private readonly serperService: SerperService) {

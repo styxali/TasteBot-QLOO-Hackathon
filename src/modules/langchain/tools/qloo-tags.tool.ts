@@ -8,7 +8,11 @@ export class QlooTagsTool extends BaseTool {
   name = 'qloo_tags';
   description = 'Get tags and categories for entities to understand preferences';
   parameters = {
-    entityId: { type: 'string', required: true, description: 'Entity ID to get tags for' },
+    type: 'object' as const,
+    properties: {
+      entityId: { type: 'string', description: 'Entity ID to get tags for' },
+    },
+    required: ['entityId'],
   };
 
   constructor(private readonly qlooService: QlooService) {

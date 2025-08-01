@@ -23,6 +23,7 @@ import { WebModule } from './modules/web/web.module';
 import { SearchModule } from './modules/search/search.module';
 import { CulturalModule } from './modules/cultural/cultural.module';
 import { ErrorHandlingModule } from './modules/error-handling/error-handling.module';
+import { PrismaModule } from './modules/prisma/prisma.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { ErrorHandlingModule } from './modules/error-handling/error-handling.mod
     SearchModule,
     CulturalModule,
     ErrorHandlingModule,
+    PrismaModule,
   ],
   controllers: [AppController],
   providers: [AppService],

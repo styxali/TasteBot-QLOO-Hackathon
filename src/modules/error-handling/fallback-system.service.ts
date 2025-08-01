@@ -108,7 +108,7 @@ export class FallbackSystemService {
     for (const fallbackService of config.fallbackChain) {
       try {
         const result = await this.getStaticFallback(serviceName, fallbackService);
-        if (result) return result;
+        if (result) return result as T;
       } catch (error) {
         console.error(`Fallback ${fallbackService} failed:`, error.message);
       }

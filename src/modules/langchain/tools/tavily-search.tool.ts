@@ -8,10 +8,14 @@ export class TavilySearchTool extends BaseTool {
   name = 'tavily_search';
   description = 'AI-powered search for real-time information and insights';
   parameters = {
-    query: { type: 'string', required: true, description: 'Search query' },
-    searchDepth: { type: 'string', required: false, description: 'Search depth (basic/advanced)' },
-    includeImages: { type: 'boolean', required: false, description: 'Include images in results' },
-    maxResults: { type: 'number', required: false, description: 'Maximum number of results' },
+    type: 'object' as const,
+    properties: {
+      query: { type: 'string', description: 'Search query' },
+      searchDepth: { type: 'string', description: 'Search depth (basic/advanced)' },
+      includeImages: { type: 'boolean', description: 'Include images in results' },
+      maxResults: { type: 'number', description: 'Maximum number of results' },
+    },
+    required: ['query'],
   };
 
   constructor(private readonly tavilyService: TavilyService) {

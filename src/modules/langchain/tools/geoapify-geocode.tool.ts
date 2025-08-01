@@ -8,8 +8,12 @@ export class GeoapifyGeocodeTool extends BaseTool {
   name = 'geoapify_geocode';
   description = 'Geocode addresses and resolve location coordinates';
   parameters = {
-    address: { type: 'string', required: true, description: 'Address to geocode' },
-    type: { type: 'string', required: false, description: 'Geocoding type (forward/reverse)' },
+    type: 'object' as const,
+    properties: {
+      address: { type: 'string', description: 'Address to geocode' },
+      type: { type: 'string', description: 'Geocoding type (forward/reverse)' },
+    },
+    required: ['address'],
   };
 
   constructor(private readonly geoapifyService: GeoapifyService) {

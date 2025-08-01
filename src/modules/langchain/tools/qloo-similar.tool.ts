@@ -8,9 +8,13 @@ export class QlooSimilarTool extends BaseTool {
   name = 'qloo_similar';
   description = 'Find similar entities for taste expansion and discovery';
   parameters = {
-    entityId: { type: 'string', required: true, description: 'Entity ID to find similar items for' },
-    type: { type: 'string', required: false, description: 'Type filter for similar entities' },
-    limit: { type: 'number', required: false, description: 'Maximum number of similar entities' },
+    type: 'object' as const,
+    properties: {
+      entityId: { type: 'string', description: 'Entity ID to find similar items for' },
+      type: { type: 'string', description: 'Type filter for similar entities' },
+      limit: { type: 'number', description: 'Maximum number of similar entities' },
+    },
+    required: ['entityId'],
   };
 
   constructor(private readonly qlooService: QlooService) {

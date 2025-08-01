@@ -8,8 +8,12 @@ export class FirecrawlAnalysisTool extends BaseTool {
   name = 'firecrawl_analysis';
   description = 'Extract and analyze content from websites for venue insights';
   parameters = {
-    url: { type: 'string', required: true, description: 'URL to scrape and analyze' },
-    analysisType: { type: 'string', required: false, description: 'Type of analysis (venue/taste/general)' },
+    type: 'object' as const,
+    properties: {
+      url: { type: 'string', description: 'URL to scrape and analyze' },
+      analysisType: { type: 'string', description: 'Type of analysis (venue/taste/general)' },
+    },
+    required: ['url'],
   };
 
   constructor(private readonly firecrawlService: FirecrawlService) {

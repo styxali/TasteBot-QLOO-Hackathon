@@ -8,10 +8,14 @@ export class FoursquareVenueTool extends BaseTool {
   name = 'foursquare_venue';
   description = 'Search for venues and locations using Foursquare API';
   parameters = {
-    query: { type: 'string', required: true, description: 'Search query for venues' },
-    location: { type: 'string', required: true, description: 'Location to search in' },
-    categories: { type: 'array', required: false, description: 'Category filters for venues' },
-    limit: { type: 'number', required: false, description: 'Maximum number of venues to return' },
+    type: 'object' as const,
+    properties: {
+      query: { type: 'string', description: 'Search query for venues' },
+      location: { type: 'string', description: 'Location to search in' },
+      categories: { type: 'array', description: 'Category filters for venues' },
+      limit: { type: 'number', description: 'Maximum number of venues to return' },
+    },
+    required: ['query', 'location'],
   };
 
   constructor(private readonly foursquareService: FoursquareService) {

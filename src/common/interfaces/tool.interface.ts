@@ -43,8 +43,10 @@ export interface Message {
 
 export interface OrchestrationResult {
   success: boolean;
+  result: string;
   response: string;
   toolsUsed: string[];
+  executionTime: number;
   data?: any;
   error?: string;
 }

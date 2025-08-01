@@ -83,7 +83,7 @@ export class CulturalIntelligenceService {
 
     // Get top preferences
     const topPreferences = Object.entries(preferenceCount)
-      .sort(([, a], [, b]) => b - a)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
       .slice(0, 5)
       .map(([pref]) => pref);
 
