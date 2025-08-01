@@ -28,12 +28,12 @@ export class QlooRecommendationsTool extends BaseTool {
       }
 
       console.log(`🎯 Getting Qloo recommendations for entities: ${params.entities.join(', ')}`);
-      
+
       const recommendations = await this.qlooService.getRecommendations(
         params.entities,
         params.location
       );
-      
+
       const result = this.createSuccessResult(recommendations, {
         toolName: 'qloo_recommendations',
         entities: params.entities,

@@ -264,17 +264,25 @@ export class EnhancedTelegramService {
             await this.sendMessage(chatId, response);
 
             // Update user taste profile with visual preferences
+            const currentProfile = await this.memorySystem.getTasteProfile(userId);
+            const updatedPreferences = {
+                music: currentProfile?.corePreferences?.music || [],
+                movies: currentProfile?.corePreferences?.movies || [],
+                books: currentProfile?.corePreferences?.books || [],
+                food: currentProfile?.corePreferences?.food || [],
+                aesthetics: [
+                    ...(currentProfile?.corePreferences?.aesthetics || []),
+                    {
+                        id: `visual_${Date.now()}`,
+                        name: imageAnalysis.styleClassification,
+                        type: 'aesthetic',
+                        tags: imageAnalysis.aestheticElements,
+                    },
+                ],
+            };
+            
             await this.memorySystem.updateTasteProfile(userId, {
-                corePreferences: {
-                    aesthetics: [
-                        {
-                            id: `visual_${Date.now()}`,
-                            name: imageAnalysis.styleClassification,
-                            type: 'aesthetic',
-                            tags: imageAnalysis.aestheticElements,
-                        },
-                    ],
-                },
+                corePreferences: updatedPreferences,
             });
 
         } catch (error) {
