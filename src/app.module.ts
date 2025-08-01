@@ -16,6 +16,7 @@ import { LocationModule } from './modules/location/location.module';
 import { StripeModule } from './modules/stripe/stripe.module';
 import { SessionModule } from './modules/session/session.module';
 import { LangChainModule } from './modules/langchain/langchain.module';
+import { NavigationModule } from './modules/navigation/navigation.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { LangChainModule } from './modules/langchain/langchain.module';
     StripeModule,
     SessionModule,
     LangChainModule,
+    NavigationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
