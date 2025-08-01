@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { BaseTasteBotTool } from '../base-tool';
+import { BaseTool } from '../base-tool';
 import { ToolResult, UserContext } from '../../../common/interfaces/tool.interface';
 import { TavilyService } from '../../search/tavily.service';
 
 @Injectable()
-export class TavilySearchTool extends BaseTasteBotTool {
+export class TavilySearchTool extends BaseTool {
   name = 'tavily_search';
   description = 'AI-powered search for real-time information and insights';
   parameters = {

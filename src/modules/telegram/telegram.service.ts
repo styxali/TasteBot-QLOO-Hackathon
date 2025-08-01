@@ -3,23 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import { UserService } from '../user/user.service';
 import { PlanService } from '../plan/plan.service';
 import { SessionService } from '../session/session.service';
-import { text } from 'express';
-import { string } from 'joi';
-import { any } from 'joi';
-import { string } from 'joi';
-import { string } from 'joi';
-import { text } from 'express';
-import { string } from 'joi';
-import { string } from 'joi';
-import { text } from 'express';
-import { string } from 'joi';
-import { string } from 'joi';
-import { text } from 'express';
-import { string } from 'joi';
-import { string } from 'joi';
-import { text } from 'express';
-import { string } from 'joi';
-import { text } from 'express';
 import { string } from 'joi';
 import { text } from 'express';
 
@@ -788,7 +771,6 @@ Or use these quick options:`;
       .replace(/\\/g, '') // Remove escape characters
       .trim();
   }
-  }
 
   private convertToMarkdown(text: string): string {
     return text
@@ -810,7 +792,7 @@ Or use these quick options:`;
     return text.replace(/([_*\[\]()~`>#+=|{}.!-\\])/g, '\\$1');
   }
 
-  formatPlanResponse(plan: any): string {
+  private formatPlanResponse(plan: any): string {
     if (!plan || !plan.activities) return 'No plan generated.';
 
     let response = `🎯 Here's your personalized plan:\n\n`;
@@ -826,7 +808,7 @@ Or use these quick options:`;
     return response;
   }
 
-  createQuickStartKeyboard() {
+  private createQuickStartKeyboard() {
     return {
       inline_keyboard: [
         [

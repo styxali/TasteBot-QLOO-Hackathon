@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { BaseTasteBotTool } from '../base-tool';
+import { BaseTool } from '../base-tool';
 import { ToolResult, UserContext } from '../../../common/interfaces/tool.interface';
 import { SerperService } from '../../search/serper.service';
 
 @Injectable()
-export class SerperEventsTool extends BaseTasteBotTool {
+export class SerperEventsTool extends BaseTool {
   name = 'serper_events';
   description = 'Search for local events and happenings using Google search';
   parameters = {

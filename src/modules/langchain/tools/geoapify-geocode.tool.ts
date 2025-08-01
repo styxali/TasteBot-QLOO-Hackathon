@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { BaseTasteBotTool } from '../base-tool';
+import { BaseTool } from '../base-tool';
 import { ToolResult, UserContext } from '../../../common/interfaces/tool.interface';
 import { GeoapifyService } from '../../location/geoapify.service';
 
 @Injectable()
-export class GeoapifyGeocodeTool extends BaseTasteBotTool {
+export class GeoapifyGeocodeTool extends BaseTool {
   name = 'geoapify_geocode';
   description = 'Geocode addresses and resolve location coordinates';
   parameters = {
@@ -27,7 +27,7 @@ export class GeoapifyGeocodeTool extends BaseTasteBotTool {
 
       console.log(`🗺️ Geocoding address: ${params.address}`);
       
-      const geocodeResult = await this.geoapifyService.geocodeAddress(params.address);
+      const geocodeResult = await this.geoapifyService.geocode(params.address);
       
       const result = this.createSuccessResult(geocodeResult, {
         toolName: 'geoapify_geocode',

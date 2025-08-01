@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { BaseTasteBotTool } from '../base-tool';
+import { BaseTool } from '../base-tool';
 import { ToolResult, UserContext } from '../../../common/interfaces/tool.interface';
 import { FoursquareService } from '../../location/foursquare.service';
 
 @Injectable()
-export class FoursquareVenueTool extends BaseTasteBotTool {
+export class FoursquareVenueTool extends BaseTool {
   name = 'foursquare_venue';
   description = 'Search for venues and locations using Foursquare API';
   parameters = {
